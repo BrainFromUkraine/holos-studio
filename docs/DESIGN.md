@@ -6,7 +6,7 @@ lives in the project's design canvas; this file is the source of truth for the i
 ## Principles
 
 - **Automatic first.** The app applies confident edits on its own; the user answers only the
-  uncertain ones (listen ~3 s, press Y / N). The transcript editor is a fallback for manual fixes,
+  uncertain ones (listen ~3 s, then the **Cut** / **Keep** buttons; Y / N work as keyboard shortcuts). The transcript editor is a fallback for manual fixes,
   never the main workflow.
 - **A professional audio tool, not a web dashboard.** Dense layout, hairline separators, small type,
   tabular monospaced numbers, keyboard shortcuts on every action.
@@ -59,6 +59,19 @@ Spectrogram colormap: `#080a08 → #0c1a10 → #11391f → #1f7a43 → #3fd17a �
      **Edits** (labelled blocks), **Loudness** (short-term curve with the −16 LUFS target);
    - playhead across all lanes.
 5. **Inspector** (right, ~320 px): selected edit — confidence, source, range, cut-point levels,
-   crossfade, before / cut / after text, **Cut (Y) / Keep (N)**, nudge ±10 ms, snap to silence;
+   crossfade, before / cut / after text, large **Cut** / **Keep** buttons (Y / N as shortcuts, shown in tooltips), nudge ±10 ms, snap to silence;
    below: the processing chain with per-module toggles and key parameters.
 6. **Status bar** (26 px): format, ASR model and GPU, applied / open counts, engine version.
+
+## Screens
+
+1. **Import** — drop zone; file table (duration, format, loudness, per-file progress); processing steps
+   (import → analysis → transcription → suggestions → processing) with overall progress; episode settings:
+   language, glossary, loudness target, which edit types apply automatically.
+2. **Overview** — the whole episode: clips, waveform, spectrum, edits (cuts, questions, pauses), breaths and
+   drop-outs, loudness; right panel: questions with Cut / Keep buttons and the automatic summary.
+3. **Editor (detail)** — the zoomed timeline described above.
+4. **Export** — formats (WAV / MP3 / FLAC / M4A), loudness preset (podcast −16, YouTube −14, broadcast −23),
+   transcript / SRT / chapters, metadata with artwork, auto-detected chapters, pre-export checks, destination.
+
+Navigation between the three stages (Import · Editing · Export) lives in the title bar.

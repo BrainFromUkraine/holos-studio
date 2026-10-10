@@ -7,7 +7,7 @@ import { currentProject, engine, fmtDuration, type FileInfo, type Job, type Summ
 import { dirname, isDesktop, joinPath, onFilesDropped, pickAudioFiles, pickProjectPath } from "@/lib/desktop";
 
 const TARGETS = [
-  { v: -16, label: "Подкаст · −16 LUFS · −1 dBTP" },
+  { v: -16, label: "Подкаст · −16 LUFS · −2 dBTP" },
   { v: -14, label: "YouTube · −14 LUFS" },
   { v: -23, label: "Мовлення EBU · −23 LUFS" },
 ];

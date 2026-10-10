@@ -75,6 +75,10 @@ class GainEdit(_EditBase):
 
 class CutEdit(_EditBase):
     type: Literal["cut"] = "cut"
+    kind: str = ""          # retake | repeat | filler | fragment | sound | manual
+    text: str = ""          # transcript of what is cut
+    before: str = ""        # context
+    after: str = ""
 
 
 class PauseEdit(_EditBase):

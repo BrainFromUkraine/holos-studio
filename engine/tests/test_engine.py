@@ -143,3 +143,67 @@ def test_load_16k(tmp_path):
     sf.write(tmp_path / "a.wav", np.stack([x, x], 1), SR, subtype="PCM_24")
     y = load_16k(str(tmp_path / "a.wav"))
     assert y.dtype == np.float32 and len(y) == 24000
+
+
+def _words(text, t0=0.0, dur=0.3):
+    from holos.project import Word
+    return [Word(w=w, start=round(t0 + i * dur, 3), end=round(t0 + i * dur + dur * 0.8, 3)) for i, w in enumerate(text.split())]
+
+
+def test_find_repeats_false_start_vs_normal_speech():
+    from holos.suggest import find_repeats
+    W = _words("підключається плату по USB І бачите спектр і фа... І фо... І бачите спектр і waterfall")
+    r = find_repeats(W)
+    assert len(r) == 1 and W[r[0][0]].w == "І" and W[r[0][1]].w == "І" and r[0][0] == 4 and r[0][1] == 11
+    normal = _words("Pi 4 на 2 гігабайти коштує 67 доларів а Pi 5 на 2 гігабайти коштує 77 доларів")
+    assert find_repeats(normal) == []
+
+
+def test_find_retake_between_files():
+    from holos.suggest import find_retake
+    prev = _words("і поки тільки для Bluetooth LE. І на CrowdSupply з'явився QvsimBot1, OpenSource, робот червоно.")
+    nxt = _words("А на CrowdSupply з'явився QV8BotOne – опенсорс робот четвероногий розміром із долоню.")
+    i, m = find_retake(prev, nxt)
+    assert prev[i].w == "І" and m >= 3
+    assert find_retake(_words("зовсім інша тема тут"), nxt) is None
+
+
+def test_units_are_not_fillers():
+    from holos.suggest import FILLERS, norm
+    assert norm("мм") not in FILLERS and norm("м,") not in FILLERS and norm("Еее,") in FILLERS
+
+
+def test_snapper_finds_real_pause():
+    from holos.analysis.features import Frames
+    from holos.suggest import Snapper
+    rms = np.full(200, -25.0)
+    rms[118:122] = -45.0           # short consonant closure near the nominal boundary
+    rms[140:150] = -70.0           # real pause 0.2 s later
+    F = Frames(rms, *(np.zeros(200),) * 3, np.ones(200, bool))
+    t = Snapper(F).between(1.18, 1.20)
+    assert 1.40 <= t <= 1.50
+
+
+def test_clip_plan_tail_cut_moves_end():
+    from holos.edit import clip_plan, map_time
+    from holos.project import Clip, CutEdit, SourceAnalysis
+    A = SourceAnalysis(speech_on=1.0, speech_off=30.0, speech_level_db=-25, room_db=-75, loudness_lufs=-20)
+    edits = [CutEdit(id="a", source="s1", start=10.0, end=12.0, status="accepted"),
+             CutEdit(id="b", source="s1", start=25.0, end=40.0, status="accepted")]
+    a0, b0, rem = clip_plan(Clip(source="s1", start=0, end=40), A, edits, 0.04, 40.0)
+    assert a0 == pytest.approx(0.98) and b0 == 25.0 and rem == [(10.0, 12.0)]
+    assert map_time(13.0, a0, rem, 0.04) == pytest.approx(13.0 - 0.98 - 2.0 - 0.04)
+
+
+def test_review_roundtrip_semicolon(tmp_path):
+    from holos.project import CutEdit, Source
+    p = Project(name="t")
+    p.sources.append(Source(id="s1", path=str(tmp_path / "a.wav"), sha256="x", sr=SR, channels=2, duration=10))
+    p.edits = [CutEdit(id="s1-r1", source="s1", start=1, end=2, kind="repeat", text="а а"),
+               CutEdit(id="s1-u1", source="s1", start=3, end=4, kind="unclear", text="бла")]
+    p.save(tmp_path / "t.holos")
+    (tmp_path / "r.csv").write_text("id;decision;kind\ns1-r1;Так;repeat\ns1-u1;n;unclear\n", encoding="utf-8-sig")
+    r = CliRunner().invoke(app, ["review-apply", str(tmp_path / "t.holos"), str(tmp_path / "r.csv")])
+    assert r.exit_code == 0, r.output
+    q = Project.load(tmp_path / "t.holos")
+    assert [e.status for e in q.edits] == ["accepted", "rejected"]

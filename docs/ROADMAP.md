@@ -11,11 +11,11 @@ Goal: master a real multi-file podcast episode end to end from the command line.
 - ✅ Import: multiple source files, ordering, duplicate detection (hash)
 - ✅ Analysis: VAD, breaths, pauses, room tone, gate drop-outs
 - ✅ ASR: faster-whisper (CUDA) with word timestamps, cached per source — 18.6 min in 38 s on RTX 2060
-- ⬜ Suggestions: filler words, repeats / false starts, long pauses, breaths
+- ✅ Suggestions: retakes across files, repeats / false starts, fillers, unclear speech
 - ✅ Edit list → timeline rendering with crossfades
 - ✅ Processing chain as modules (ported from the proven pipeline)
 - ✅ Export WAV / MP3 + render report (LUFS, true peak, LRA, drop-outs)
-- ⬜ Review export: suggestions as a table (timecode, context, action)
+- ✅ Review export: suggestions as a table (timecode, context, action) + import of decisions
 - ✅ Tests on synthetic audio (no real recordings in the repo)
 
 ## Milestone 2 — UI

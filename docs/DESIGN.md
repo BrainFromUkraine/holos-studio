@@ -31,14 +31,15 @@ lives in the project's design canvas; this file is the source of truth for the i
 | `bright` | `#F4F6F4` | headings, timecode, playhead |
 | `muted` | `#8B8F8B` | labels, captions |
 | `wave` | `#1B5E38` | waveform peaks |
-| `core` | `#3FD17A` | waveform RMS core, loudness curve, live indicator |
+| `core` | `#3FD17A` | waveform RMS core, live indicator |
+| `loud` | `#22D3EE` | loudness curve |
 | `accent` | `#FFFFFF` | primary actions (Play, Export), focus; text on it `#0A0B0A` |
 | `question` | `#FFB020` | items waiting for the user |
 | `cut` | `#FF4D4D` | removed audio: border; hatch `rgba(255,77,77,0.16)` / `0.03` |
 | `cutBg` / `cutBorder` / `cutText` | `#2A1111` / `#6E2222` / `#FFA3A3` | cut blocks and the Cut button |
 | `breath` | `#7A8A7F` | breath markers; block `#161B17` / `#33413A` / `#B4C4B9` |
 
-Spectrogram colormap: `#080a08 → #0c1a10 → #11391f → #1f7a43 → #3fd17a → #b8f0c8 → #ffffff` (mel scale, 60 Hz–12 kHz).
+Spectrogram colormap (violet): `#0a0b0a → #140b2a → #2e1766 → #5b34c9 → #8b5cf6 → #c4b5fd → #f5f3ff` (mel scale, 60 Hz–12 kHz).
 
 ## Type
 

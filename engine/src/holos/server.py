@@ -22,7 +22,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from . import __version__
+from . import chapters as chapters_mod
 from . import ops
+from . import templates as templates_mod
 from .project import Project
 
 ALLOWED_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000", "tauri://localhost", "http://tauri.localhost",
@@ -77,6 +79,33 @@ class ProjectIn(BaseModel):
     path: str
 
 
+class ChapterIn(BaseModel):
+    time: float
+    title: str
+
+
+class ChaptersIn(BaseModel):
+    path: str
+    chapters: list[ChapterIn]
+
+
+class VideoIn(BaseModel):
+    template: str | None = None
+    params: dict[str, Any] = {}
+
+
+class ExportIn(BaseModel):
+    path: str
+    out_dir: str | None = None
+    name: str | None = None
+    wav: bool | None = None
+    mp3: bool | None = None
+    chapters_txt: bool | None = None
+    chapters_embed: bool | None = None
+    video: VideoIn | None = None
+    preview: float = 0
+
+
 class DecisionIn(BaseModel):
     path: str
     id: str
@@ -99,6 +128,7 @@ def create_app(token: str | None = None) -> FastAPI:
     def load(path: str) -> Project:
         if not Path(path).is_file():
             raise HTTPException(404, f"project not found: {path}")
+        templates_mod.touch_recent(path)
         return Project.load(path)
 
     def run_job(kind: str, project: str, fn: Callable[[Callable], Any]) -> Job:
@@ -160,6 +190,7 @@ def create_app(token: str | None = None) -> FastAPI:
                 if c.module == "loudness":
                     c.params["target_lufs"] = body.target_lufs
         p.save(body.path)
+        templates_mod.touch_recent(body.path)
         return {"summary": ops.summary(p), "skipped": skipped}
 
     @app.get("/api/projects/summary", dependencies=[Depends(auth)])
@@ -181,6 +212,36 @@ def create_app(token: str | None = None) -> FastAPI:
             raise HTTPException(404, f"edit not found: {body.id}")
         p.save(body.path)
         return ops.summary(p)
+
+    @app.put("/api/projects/chapters", dependencies=[Depends(auth)])
+    def put_chapters(body: ChaptersIn) -> dict:
+        p = load(body.path)
+        chapters_mod.set_chapters(p, [c.model_dump() for c in body.chapters], origin="user")
+        p.save(body.path)
+        return ops.summary(p)
+
+    @app.get("/api/templates", dependencies=[Depends(auth)])
+    def list_templates(path: str | None = None) -> dict:
+        p = load(path) if path else None
+        out = []
+        for t in templates_mod.discover().values():
+            own = p.export.video.params if p and p.export.video.template == t.manifest.id else None
+            out.append({**t.public(), "initial": templates_mod.initial_params(t, own, str(Path(path).resolve()) if path else "")})
+        return {"user_dir": str(templates_mod.home() / "templates"), "templates": out}
+
+    @app.post("/api/projects/export", dependencies=[Depends(auth)])
+    def export(body: ExportIn) -> dict:
+        load(body.path)
+        video = body.video.model_dump() if body.video else None
+        if video is not None and video.get("template"):
+            try:
+                t = templates_mod.get(video["template"])
+                templates_mod.build_args(t.manifest, video["params"])
+            except (KeyError, templates_mod.TemplateError) as e:
+                raise HTTPException(400, str(e).strip("'\""))
+        return run_job("export", body.path, lambda progress: ops.export_project(
+            body.path, body.out_dir, body.name, body.wav, body.mp3, body.chapters_txt, body.chapters_embed,
+            video, body.preview, progress)).snapshot()
 
     @app.get("/api/jobs/{job_id}", dependencies=[Depends(auth)])
     def job(job_id: str) -> dict:

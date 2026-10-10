@@ -5,7 +5,7 @@ Desktop UI — Tauri v2 + Next.js (static export). Talks to the local engine API
 ```powershell
 # terminal 1 — engine
 cd engine
-uv sync --extra asr --extra gpu
+uv sync --extra asr --extra gpu --extra video
 uv run holos serve --dev
 
 # terminal 2 — app

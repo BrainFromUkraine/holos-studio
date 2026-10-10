@@ -95,6 +95,19 @@ class FillEdit(_EditBase):
 Edit = Annotated[Union[GainEdit, CutEdit, PauseEdit, FillEdit], Field(discriminator="type")]
 
 
+class Chapter(BaseModel):
+    """A chapter starts at a word in a source recording, so it moves with the edits."""
+    source: str
+    at: float                       # source time (seconds)
+    title: str
+    origin: str = "user"            # user | claude | ...
+
+
+class VideoExport(BaseModel):
+    template: str | None = None
+    params: dict[str, Any] = {}
+
+
 class ChainStep(BaseModel):
     module: str
     enabled: bool = True
@@ -121,6 +134,9 @@ class ExportSettings(BaseModel):
     channels: Literal[1, 2] = 2
     mp3: bool = True
     mp3_kbps: int = 192
+    chapters_txt: bool = True       # YouTube description timecodes
+    chapters_embed: bool = True     # chapters inside MP3 / MP4
+    video: VideoExport = VideoExport()
 
 
 def default_chain() -> list[ChainStep]:
@@ -154,6 +170,7 @@ class Project(BaseModel):
     # edit kinds applied without asking; everything else becomes a question for the user
     auto_apply: list[str] = Field(default_factory=lambda: ["gain", "pause", "fill", "retake", "repeat", "filler"])
     export: ExportSettings = ExportSettings()
+    chapters: list[Chapter] = []
 
     # ---- persistence -------------------------------------------------
     @classmethod

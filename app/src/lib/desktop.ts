@@ -45,3 +45,26 @@ export function joinPath(dir: string, name: string): string {
   const sep = dir.includes("\\") ? "\\" : "/";
   return dir.endsWith(sep) ? dir + name : dir + sep + name;
 }
+
+export async function pickFile(filters: string[], defaultPath?: string): Promise<string | null> {
+  if (!isDesktop()) return null;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const exts = filters.flatMap((e) => [e.toLowerCase(), e.toUpperCase()]);
+  const res = await open({ multiple: false, directory: false, defaultPath, filters: exts.length ? [{ name: "Files", extensions: exts }] : [] });
+  return typeof res === "string" ? res : null;
+}
+
+export async function pickFolder(defaultPath?: string): Promise<string | null> {
+  if (!isDesktop()) return null;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const res = await open({ multiple: false, directory: true, defaultPath });
+  return typeof res === "string" ? res : null;
+}
+
+/** Show a file in Explorer / Finder (desktop only). */
+export async function revealFile(path: string): Promise<boolean> {
+  if (!isDesktop()) return false;
+  const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
+  await revealItemInDir(path);
+  return true;
+}

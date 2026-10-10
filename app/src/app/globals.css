@@ -1,0 +1,82 @@
+/* Holos Studio — "studio green" tokens (docs/DESIGN.md). Square corners everywhere. */
+:root {
+  --bg: #0a0b0a;
+  --bar: #060706;
+  --lane: #080908;
+  --panel: #141614;
+  --raised: #1b1e1b;
+  --sel: #2a2e2a;
+  --sel-row: #152a1c;
+  --border: #262926;
+  --dim: #3e423e;
+  --text: #e5e7e5;
+  --text2: #aeb3ae;
+  --bright: #f4f6f4;
+  --muted: #8b8f8b;
+  --wave: #1b5e38;
+  --core: #3fd17a;
+  --loud: #22d3ee;
+  --accent: #ffffff;
+  --on-accent: #0a0b0a;
+  --question: #ffb020;
+  --q-bg: #1a160b;
+  --q-border: #4a3a16;
+  --cut: #ff4d4d;
+  --cut-bg: #2a1111;
+  --cut-border: #6e2222;
+  --cut-text: #ffa3a3;
+  --breath: #7a8a7f;
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; border-radius: 0 !important; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 13px; }
+a { color: inherit; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: 0.55; }
+:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+.mono { font-family: var(--mono); }
+.muted { color: var(--muted); }
+
+/* layout */
+.app { min-height: 100vh; display: flex; flex-direction: column; }
+.main { flex: 1 1 auto; display: flex; flex-wrap: wrap; min-height: 0; }
+.panel { background: var(--panel); }
+.section-title { margin: 0; font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.8px; }
+
+/* title & status bars */
+.titlebar { height: 38px; display: flex; align-items: center; gap: 14px; padding: 0 14px; background: var(--bar); border-bottom: 1px solid var(--border); }
+.titlebar .brand { font-weight: 600; display: flex; align-items: center; gap: 10px; }
+.titlebar nav { display: flex; height: 38px; margin-left: 24px; }
+.titlebar nav a { display: flex; align-items: center; padding: 0 14px; text-decoration: none; color: var(--text2); border-bottom: 2px solid transparent; }
+.titlebar nav a[aria-current="page"] { color: var(--bright); border-bottom-color: var(--core); }
+.statusbar { height: 26px; display: flex; align-items: center; gap: 18px; padding: 0 14px; background: var(--bar); border-top: 1px solid var(--border); font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.dot { display: inline-block; width: 7px; height: 7px; background: var(--muted); }
+.dot.ok { background: var(--core); }
+.dot.bad { background: var(--cut); }
+
+/* controls */
+.btn { height: 36px; padding: 0 14px; border: 1px solid var(--border); background: var(--raised); color: var(--text); }
+.btn:hover:not(:disabled) { background: var(--sel); }
+.btn.primary { border: 0; background: var(--accent); color: var(--on-accent); font-weight: 600; }
+.btn.primary:hover:not(:disabled) { background: #dfe3df; }
+.btn.cut { border-color: var(--cut-border); background: var(--cut-bg); color: var(--cut-text); font-weight: 600; }
+.btn.big { height: 44px; font-size: 14px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field > span { font-size: 12px; color: var(--muted); }
+.input, .select { height: 34px; padding: 0 8px; background: var(--raised); border: 1px solid var(--border); color: var(--text); }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px; border: 1px solid var(--border); background: var(--raised); font-family: var(--mono); font-size: 11px; }
+.chip button { border: 0; background: transparent; color: var(--muted); padding: 0; line-height: 1; }
+
+/* tables */
+.table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.table th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 500; text-align: left; padding: 8px 12px; }
+.table td { padding: 7px 12px; border-top: 1px solid #1c1f1c; }
+.bar { height: 6px; background: var(--raised); position: relative; }
+.bar > i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--core); }
+
+.banner { padding: 10px 14px; border: 1px solid var(--q-border); background: var(--q-bg); color: var(--text); }
+.banner.error { border-color: var(--cut-border); background: var(--cut-bg); }

@@ -8,13 +8,10 @@ from typing import Annotated, Optional
 import typer
 
 from . import __version__
-from .project import Clip, Project, Source, natural_key, sha256_file
+from .project import Project
 
 app = typer.Typer(add_completion=False, no_args_is_help=True,
                   help="Holos Studio engine — podcast analysis, editing and mastering.")
-
-AUTO_ACCEPT = {"gain", "pause", "fill"}
-
 
 def _echo(msg: str) -> None:
     typer.echo(msg)
@@ -34,55 +31,35 @@ def new(project: Annotated[Path, typer.Argument(help="Project file to create (*.
         keep_order: Annotated[bool, typer.Option(help="Keep the given order instead of sorting by file name.")] = False,
         force: Annotated[bool, typer.Option(help="Overwrite an existing project file.")] = False) -> None:
     """Create a project from recordings (duplicates are skipped by content hash)."""
-    from .io import info
+    from .ops import create_project
     if project.exists() and not force:
         raise typer.BadParameter(f"{project} exists (use --force)")
-    ordered = files if keep_order else sorted(files, key=lambda f: natural_key(f.name))
-    p = Project(name=name or project.stem)
-    seen: dict[str, Path] = {}
-    rates = set()
-    for f in ordered:
-        h = sha256_file(f)
-        if h in seen:
-            _echo(f"  skip duplicate: {f.name} (same as {seen[h].name})")
-            continue
-        seen[h] = f
-        sr, ch, dur = info(str(f))
-        rates.add(sr)
-        sid = f"s{len(p.sources) + 1}"
-        p.sources.append(Source(id=sid, path=str(f.resolve()), sha256=h, sr=sr, channels=ch, duration=round(dur, 3)))
-        p.timeline.append(Clip(source=sid, start=0.0, end=round(dur, 3)))
-    if len(rates) > 1:
-        raise typer.BadParameter(f"mixed sample rates {sorted(rates)} are not supported yet")
-    p.sample_rate = rates.pop() if rates else 48000
-    p.save(project)
+    try:
+        p, skipped = create_project(project, files, name, keep_order)
+    except ValueError as e:
+        raise typer.BadParameter(str(e))
+    for it in skipped:
+        _echo(f"  skip duplicate: {it['name']} (same as {it['duplicate_of']})")
     total = sum(s.duration for s in p.sources)
     _echo(f"Created {project}: {len(p.sources)} sources, {total / 60:.1f} min, {p.sample_rate} Hz")
+
+
+def _cli_progress(stage: str, done: int, total: int, detail: str) -> None:
+    if detail and detail != "done":
+        _echo(f"  {detail}")
 
 
 @app.command()
 def analyze(project: Path,
             suggest_only: Annotated[bool, typer.Option(help="Leave all detections as suggestions.")] = False) -> None:
     """Measure every source and detect breaths, long pauses and gate drop-outs."""
-    from .analysis import analyze_source
-    from .io import load_mono
+    from .ops import analyze_project
     p = Project.load(project)
-    p.edits = [e for e in p.edits if e.type not in ("gain", "pause", "fill")]   # keep cuts / suggestions
-    t0 = time.time()
-    for s in p.sources:
-        x, sr = load_mono(s.path)
-        A, edits = analyze_source(x, sr, s.id, p.analysis_settings)
-        if not suggest_only:
-            for e in edits:
-                if e.type in AUTO_ACCEPT:
-                    e.status = "accepted"
-        p.analysis[s.id] = A
-        p.edits.extend(edits)
-        counts = {t: sum(e.type == t for e in edits) for t in ("gain", "pause", "fill")}
-        _echo(f"  {Path(s.path).name}: {A.loudness_lufs:.1f} LUFS, breaths {counts['gain']}, "
-              f"pauses {counts['pause']}, drop-outs {counts['fill']}")
-    p.save(project)
-    _echo(f"Analyzed {len(p.sources)} sources in {time.time() - t0:.0f}s")
+    if suggest_only:
+        p.auto_apply = [k for k in p.auto_apply if k not in ("gain", "pause", "fill")]
+    r = analyze_project(p, project, _cli_progress)
+    _echo(f"Analyzed {len(p.sources)} sources in {r['seconds']:.0f}s: breaths {r['gain']}, "
+          f"pauses {r['pause']}, drop-outs {r['fill']}")
 
 
 @app.command()
@@ -93,24 +70,16 @@ def transcribe(project: Path,
                glossary: Annotated[Optional[str], typer.Option(
                    help="Comma-separated terms to spell correctly, e.g. 'ESP32, LoRa, KiCad'. Saved in the project.")] = None) -> None:
     """Transcribe every source with word timestamps (cached per audio content)."""
-    from .asr import transcribe_sources
+    from .ops import transcribe_project
     p = Project.load(project)
     if model: p.asr.model = model
     if language: p.asr.language = language
     if device: p.asr.device = device  # type: ignore[assignment]
     if glossary is not None:
         p.asr.glossary = [g.strip() for g in glossary.split(",") if g.strip()]
-    cache = project.parent / f"{project.stem}.holos-cache" / "asr"
-    t0 = time.time()
-    res = transcribe_sources([(s.id, s.path, s.sha256) for s in p.sources], p.asr, cache,
-                             log=lambda m: _echo(f"  {m}"))
-    for sid, (words, meta) in res.items():
-        p.transcript[sid] = words
-        p.transcript_meta[sid] = meta
-    p.save(project)
-    n = sum(len(w) for w, _ in res.values())
+    r = transcribe_project(p, project, _cli_progress)
     audio = sum(s.duration for s in p.sources)
-    _echo(f"Transcribed {len(res)} sources, {n} words, {audio / 60:.1f} min audio in {time.time() - t0:.0f}s")
+    _echo(f"Transcribed {len(p.sources)} sources, {r['words']} words, {audio / 60:.1f} min audio in {r['seconds']:.0f}s")
 
 
 @app.command()
@@ -145,44 +114,44 @@ def transcript(project: Path,
         _echo(text)
 
 
-AUTO_KINDS = {"retake", "repeat", "filler", "fragment", "sound", "unclear"}
 RECOMMENDED = {"retake", "repeat", "filler"}          # pre-filled "y" in the review sheet
 
 
 @app.command("suggest")
 def suggest_cmd(project: Path,
                 no_audio: Annotated[bool, typer.Option(help="Transcript only (skip the audio-based filler search).")] = False) -> None:
-    """Find retakes, repeats, fillers and unclear speech; adds them as suggested cuts."""
-    from .analysis.features import frame_features
-    from .io import load_mono
-    from .project import CutEdit
-    from .suggest import suggest
+    """Find retakes, repeats, fillers and unclear speech. Kinds in the project's auto_apply list are
+    accepted right away; the rest are left as questions."""
+    from .ops import suggest_project
     p = Project.load(project)
     if not p.transcript:
         raise typer.BadParameter("run `holos transcribe` first")
-    frames, cache = {}, {}
+    r = suggest_project(p, project, use_audio=not no_audio)
+    _echo(f"{r['total']} suggestions: " + (", ".join(f"{k} {v}" for k, v in sorted(r['by_kind'].items())) or "none")
+          + f" · {r['questions']} need your decision")
 
-    def audio(sid):
-        if sid not in cache:
-            cache.clear()
-            cache[sid] = load_mono(p.source(sid).path)
-        return cache[sid]
 
-    if not no_audio:
-        for s in p.sources:
-            frames[s.id] = frame_features(*audio(s.id))
-    new = suggest(p, frames, audio=None if no_audio else audio)
-    # keep earlier decisions for the same suggestion
-    old = {(e.source, e.kind, round(e.start, 1), round(e.end, 1)): e.status
-           for e in p.edits if isinstance(e, CutEdit) and e.kind in AUTO_KINDS}
-    for e in new:
-        e.status = old.get((e.source, e.kind, round(e.start, 1), round(e.end, 1)), "suggested")
-    p.edits = [e for e in p.edits if not (isinstance(e, CutEdit) and e.kind in AUTO_KINDS)] + new
-    p.save(project)
-    by = {}
-    for e in new:
-        by[e.kind] = by.get(e.kind, 0) + 1
-    _echo(f"{len(new)} suggestions: " + (", ".join(f"{k} {v}" for k, v in sorted(by.items())) or "none"))
+@app.command()
+def process(project: Path) -> None:
+    """Full automatic pass: analyze → transcribe → suggest."""
+    from .ops import process_project
+    r = process_project(project, _cli_progress)
+    _echo(str(r))
+
+
+@app.command()
+def serve(port: Annotated[int, typer.Option(help="Port on 127.0.0.1.")] = 8765,
+          token: Annotated[Optional[str], typer.Option(help="Access token (default: random, printed).")] = None,
+          dev: Annotated[bool, typer.Option(help="No token (local development only).")] = False) -> None:
+    """Local API for the Holos Studio app (binds to 127.0.0.1 only)."""
+    import secrets
+    import uvicorn
+    from .server import create_app
+    tok = None if dev else (token or secrets.token_urlsafe(24))
+    if tok:
+        _echo(f"HOLOS_TOKEN={tok}")
+    _echo(f"Holos engine API on http://127.0.0.1:{port}")
+    uvicorn.run(create_app(tok), host="127.0.0.1", port=port, log_level="warning")
 
 
 def _fmt(t: float) -> str:

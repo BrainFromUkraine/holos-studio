@@ -18,8 +18,12 @@ def analyze_source(x: np.ndarray, sr: int, sid: str, settings: AnalysisSettings,
                    frames: Frames | None = None) -> tuple[SourceAnalysis, list]:
     F = frames or frame_features(x, sr)
     rms, speech, N = F.rms_db, F.speech, F.n
-    if not speech.any():
-        raise ValueError(f"{sid}: no speech detected")
+    if not speech.any():                       # music, tone, silence: keep the file whole, suggest nothing
+        lufs = float(pyln.Meter(sr).integrated_loudness(x)) if len(x) > sr else -70.0
+        dur = len(x) / sr
+        return SourceAnalysis(speech_on=0.0, speech_off=round(dur, 3), speech_level_db=float(np.median(rms)) if N else -90.0,
+                              room_db=float(np.percentile(rms, 10)) if N else -90.0,
+                              loudness_lufs=round(lufs if np.isfinite(lufs) else -70.0, 2)), []
     sp_med = float(np.median(rms[speech]))
     nsl = rms[(~speech) & (rms > -82)]
     room = float(np.percentile(nsl, 20)) if len(nsl) else -75.0

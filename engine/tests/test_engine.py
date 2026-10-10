@@ -127,10 +127,14 @@ def test_cli_transcript_output(tmp_path):
     from holos.project import Source, Word
     p = Project(name="t")
     p.sources.append(Source(id="s1", path=str(tmp_path / "POD1.WAV"), sha256="x", sr=SR, channels=2, duration=3))
-    p.transcript["s1"] = [Word(w="Привіт.", start=1.0, end=1.4), Word(w="Як", start=61.5, end=61.7), Word(w="справи?", start=61.7, end=62.0)]
+    p.transcript["s1"] = [Word(w="Привіт.", start=1.0, end=1.4), Word(w="Як", start=61.5, end=61.7), Word(w="справи?", start=61.7, end=62.0),
+                        Word(w="ESP", start=63.0, end=63.2), Word(w="-32", start=63.2, end=63.5), Word(w="пам", start=63.6, end=63.8),
+                        Word(w="'яті", start=63.8, end=64.0), Word(w="–", start=64.1, end=64.2), Word(w="2", start=64.3, end=64.4),
+                        Word(w=",4.", start=64.4, end=64.6)]
     p.save(tmp_path / "t.holos")
     r = CliRunner().invoke(app, ["transcript", str(tmp_path / "t.holos")])
     assert r.exit_code == 0 and "[00:01.00] Привіт." in r.output and "[01:01.50] Як справи?" in r.output
+    assert "ESP-32 пам'яті – 2,4." in r.output
 
 
 def test_load_16k(tmp_path):

@@ -128,7 +128,10 @@ def transcript(project: Path,
         for w in words:
             if t_line is None:
                 t_line = w.start
-            line.append(w.w)
+            if line and (w.w[:1] in "-',.:;!?…)%" or line[-1][-1:] in "-'(") and w.w[:1] != "–":
+                line[-1] += w.w          # Whisper sub-word pieces: "ESP" "-32" → "ESP-32", "пам" "'яті"
+            else:
+                line.append(w.w)
             if w.w.endswith((".", "?", "!")) or len(line) >= 18:
                 lines.append(f"[{int(t_line // 60):02d}:{t_line % 60:05.2f}] " + " ".join(line))
                 line, t_line = [], None

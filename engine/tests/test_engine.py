@@ -207,3 +207,19 @@ def test_review_roundtrip_semicolon(tmp_path):
     assert r.exit_code == 0, r.output
     q = Project.load(tmp_path / "t.holos")
     assert [e.status for e in q.edits] == ["accepted", "rejected"]
+
+
+def test_find_retake_latin_vs_cyrillic_spelling():
+    from holos.suggest import find_retake
+    prev = _words("для bluetooth ли і на крауд саплай з 'явився кью вісім бот ван овпенсорс робот червоно")
+    nxt = _words("А на CrowdSupply з 'явився QV8BotOne, open -source робот четвероногий розміром із долоню")
+    r = find_retake(prev, nxt)
+    assert r is not None and prev[r[0]].w in ("і", "на")
+
+
+def test_find_retake_does_not_eat_previous_word():
+    from holos.suggest import find_retake
+    prev = _words("одна із найбільших виставок у світі. Це був тиждень електроніки на BrainFromUkraine. Якщо бачили")
+    nxt = _words("Це був тиждень електроніки на BrainFromUkraine. Якщо бачили цікаву новину")
+    i, _ = find_retake(prev, nxt)
+    assert prev[i].w == "Це"

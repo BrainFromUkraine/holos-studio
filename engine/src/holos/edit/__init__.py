@@ -124,37 +124,19 @@ def build_program(p: Project) -> Program:
                     L = b - a
                     x[a:b] += rt_local.take(L / sr + 0.01)[:L] * _fade_window(L, int(0.02 * sr))
 
-        # removals: cuts and pause middles
-        removals: list[tuple[float, float, str]] = []
-        for e in edits:
-            if isinstance(e, PauseEdit):
-                excess = (e.end - e.start) - e.target
-                if excess > 0:
-                    mid = (e.start + e.end) / 2
-                    removals.append((mid - excess / 2, mid + excess / 2, e.id))
-            elif isinstance(e, CutEdit):
-                removals.append((e.start, e.end, e.id))
-        removals.sort()
-
-        a0 = max(clip.start, A.speech_on - 0.02)
-        b0 = min(clip.end, A.speech_off + 0.08, len(x) / sr)
+        a0, b0, removals = clip_plan(clip, A, edits, ts.crossfade, len(x) / sr)
         pieces, cur = [], a0
-        for cs, ce, _ in removals:
-            if ce <= cur or cs >= b0:
-                continue
-            pieces.append(x[int(cur * sr):int(max(cur, cs) * sr)])
-            cur = max(cur, ce)
+        for cs, ce in removals:
+            pieces.append(x[int(cur * sr):int(cs * sr)])
+            cur = ce
         pieces.append(x[int(cur * sr):int(b0 * sr)])
-        seg = pieces[0]
+        pieces = [pc for pc in pieces if len(pc)]
+        seg = pieces[0] if pieces else np.zeros(int(0.05 * sr))
         for pc in pieces[1:]:
             seg = crossjoin(seg, pc, xf)
 
         def mapt(t: float, _a0=a0, _rem=removals) -> float:
-            o = t - _a0
-            for cs, ce, _ in _rem:
-                if t >= ce:
-                    o -= (ce - cs) - ts.crossfade
-            return o
+            return map_time(t, _a0, _rem, ts.crossfade)
 
         clips_audio.append((seg, [(e, mapt(e.start)) for e in edits], a0, clip.source))
 
@@ -176,6 +158,68 @@ def build_program(p: Project) -> Program:
     out[-tail:] *= np.linspace(1, 0, tail) ** 2
     prog.audio = out
     return prog
+
+
+def clip_plan(clip, A, edits, xf: float, dur: float) -> tuple[float, float, list[tuple[float, float]]]:
+    """Kept range [a0, b0] of a source and the merged removals inside it (seconds)."""
+    a0 = max(clip.start, A.speech_on - 0.02)
+    b0 = min(clip.end, A.speech_off + 0.08, dur)
+    rem: list[tuple[float, float]] = []
+    for e in edits:
+        if isinstance(e, PauseEdit):
+            excess = (e.end - e.start) - e.target
+            if excess > 0:
+                mid = (e.start + e.end) / 2
+                rem.append((mid - excess / 2, mid + excess / 2))
+        elif isinstance(e, CutEdit):
+            rem.append((e.start, e.end))
+    merged: list[list[float]] = []
+    for cs, ce in sorted(rem):
+        cs, ce = max(cs, a0), min(ce, b0)
+        if ce <= cs:
+            continue
+        if merged and cs <= merged[-1][1] + xf:
+            merged[-1][1] = max(merged[-1][1], ce)
+        else:
+            merged.append([cs, ce])
+    # a removal reaching the end of the kept range simply moves the end
+    if merged and merged[-1][1] >= b0 - 1e-6:
+        b0 = merged.pop()[0]
+    if merged and merged[0][0] <= a0 + 1e-6:
+        a0 = merged.pop(0)[1]
+    return a0, b0, [(a, b) for a, b in merged]
+
+
+def map_time(t: float, a0: float, removals: list[tuple[float, float]], xf: float) -> float:
+    """Source time → time inside the assembled clip."""
+    o = t - a0
+    for cs, ce in removals:
+        if t >= ce:
+            o -= (ce - cs) + xf          # removed audio plus the crossfade overlap
+        elif t > cs:
+            o -= t - cs
+    return o
+
+
+def timeline_map(p: Project) -> dict[str, tuple[float, float, float, list]]:
+    """Without loading audio: per source (clip start in program, a0, b0, removals)."""
+    ts = p.timeline_settings
+    out, t = {}, ts.lead_in - ts.crossfade
+    for i, clip in enumerate(p.timeline):
+        A = p.analysis[clip.source]
+        a0, b0, rem = clip_plan(clip, A, p.edits_for(clip.source), ts.crossfade, p.source(clip.source).duration)
+        start = t
+        seg = (b0 - a0) - sum(ce - cs for cs, ce in rem) - ts.crossfade * len(rem)
+        gap = ts.gap_between if i < len(p.timeline) - 1 else ts.tail
+        t = start + seg + gap
+        out[clip.source] = (start, a0, b0, rem)
+    return out
+
+
+def program_time(p: Project, sid: str, t: float, tmap=None) -> float:
+    tmap = tmap or timeline_map(p)
+    start, a0, b0, rem = tmap[sid]
+    return start + map_time(min(max(t, a0), b0), a0, rem, p.timeline_settings.crossfade)
 
 
 def _fade_window(n: int, r: int) -> np.ndarray:

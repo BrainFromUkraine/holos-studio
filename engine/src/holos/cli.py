@@ -67,7 +67,7 @@ def analyze(project: Path,
     from .analysis import analyze_source
     from .io import load_mono
     p = Project.load(project)
-    p.edits = [e for e in p.edits if not e.id.startswith(tuple(f"{s.id}-" for s in p.sources))]
+    p.edits = [e for e in p.edits if e.type not in ("gain", "pause", "fill")]   # keep cuts / suggestions
     t0 = time.time()
     for s in p.sources:
         x, sr = load_mono(s.path)
@@ -143,6 +143,94 @@ def transcript(project: Path,
         _echo(f"Wrote {out}")
     else:
         _echo(text)
+
+
+AUTO_KINDS = {"retake", "repeat", "filler", "fragment", "sound", "unclear"}
+RECOMMENDED = {"retake", "repeat", "filler"}          # pre-filled "y" in the review sheet
+
+
+@app.command("suggest")
+def suggest_cmd(project: Path,
+                no_audio: Annotated[bool, typer.Option(help="Transcript only (skip the audio-based filler search).")] = False) -> None:
+    """Find retakes, repeats, fillers and unclear speech; adds them as suggested cuts."""
+    from .analysis.features import frame_features
+    from .io import load_mono
+    from .project import CutEdit
+    from .suggest import suggest
+    p = Project.load(project)
+    if not p.transcript:
+        raise typer.BadParameter("run `holos transcribe` first")
+    frames, cache = {}, {}
+
+    def audio(sid):
+        if sid not in cache:
+            cache.clear()
+            cache[sid] = load_mono(p.source(sid).path)
+        return cache[sid]
+
+    if not no_audio:
+        for s in p.sources:
+            frames[s.id] = frame_features(*audio(s.id))
+    new = suggest(p, frames, audio=None if no_audio else audio)
+    # keep earlier decisions for the same suggestion
+    old = {(e.source, e.kind, round(e.start, 1), round(e.end, 1)): e.status
+           for e in p.edits if isinstance(e, CutEdit) and e.kind in AUTO_KINDS}
+    for e in new:
+        e.status = old.get((e.source, e.kind, round(e.start, 1), round(e.end, 1)), "suggested")
+    p.edits = [e for e in p.edits if not (isinstance(e, CutEdit) and e.kind in AUTO_KINDS)] + new
+    p.save(project)
+    by = {}
+    for e in new:
+        by[e.kind] = by.get(e.kind, 0) + 1
+    _echo(f"{len(new)} suggestions: " + (", ".join(f"{k} {v}" for k, v in sorted(by.items())) or "none"))
+
+
+def _fmt(t: float) -> str:
+    return f"{int(t // 60):02d}:{t % 60:04.1f}"
+
+
+@app.command()
+def review(project: Path,
+           out: Annotated[Path, typer.Option("--out", "-o", help="CSV file (opens in Excel).")] = Path("review.csv")) -> None:
+    """Write suggestions as a table: fill the `decision` column with y / n, then `holos review-apply`."""
+    import csv
+    from .edit import program_time, timeline_map
+    from .project import CutEdit
+    p = Project.load(project)
+    tm = timeline_map(p)
+    names = {s.id: Path(s.path).name for s in p.sources}
+    rows = [e for e in p.edits if isinstance(e, CutEdit) and e.kind]
+    rows.sort(key=lambda e: program_time(p, e.source, e.start, tm))
+    with open(out, "w", newline="", encoding="utf-8-sig") as f:      # BOM: Excel shows Cyrillic correctly
+        w = csv.writer(f)
+        w.writerow(["id", "decision", "kind", "episode_time", "file", "file_time", "seconds",
+                    "before", "cut", "after", "reason"])
+        for e in rows:
+            dec = {"accepted": "y", "rejected": "n"}.get(e.status, "y" if e.kind in RECOMMENDED else "")
+            w.writerow([e.id, dec, e.kind, _fmt(program_time(p, e.source, e.start, tm)), names[e.source],
+                        _fmt(e.start), round(e.end - e.start, 2), e.before, e.text, e.after, e.reason])
+    _echo(f"Wrote {out}: {len(rows)} rows. Set decision to y (cut) / n (keep), save as CSV, then run review-apply.")
+
+
+@app.command("review-apply")
+def review_apply(project: Path, sheet: Path) -> None:
+    """Read decisions from the review CSV: y = cut, n = keep, empty = undecided."""
+    import csv
+    p = Project.load(project)
+    yes, no = {"y", "yes", "так", "т", "+", "1", "x"}, {"n", "no", "ні", "н", "-", "0"}
+    with open(sheet, newline="", encoding="utf-8-sig") as f:
+        sample = f.read(4096); f.seek(0)
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")      # Excel may save with ';'
+        decided = {r["id"]: (r.get("decision") or "").strip().lower() for r in csv.DictReader(f, dialect=dialect)}
+    n_y = n_n = 0
+    for e in p.edits:
+        d = decided.get(e.id)
+        if d in yes:
+            e.status = "accepted"; n_y += 1
+        elif d in no:
+            e.status = "rejected"; n_n += 1
+    p.save(project)
+    _echo(f"cut {n_y}, keep {n_n}, undecided {len(decided) - n_y - n_n}")
 
 
 @app.command()

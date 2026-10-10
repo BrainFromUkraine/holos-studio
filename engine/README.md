@@ -50,6 +50,30 @@ uv run holos transcript episode.holos -o transcript.txt
 - The glossary is saved in the project and passed to Whisper as a prompt, together with filler examples
   that nudge it to keep disfluencies ("еее", "ну") instead of cleaning them up.
 
+## Suggestions and review
+
+```bash
+# retakes between files, restarts inside a file, filler words, unclear speech
+uv run holos suggest episode.holos
+
+# a table for Excel: fill `decision` with y (cut) / n (keep), save, apply
+uv run holos review episode.holos -o review.csv
+uv run holos review-apply episode.holos review.csv
+uv run holos render episode.holos -o renders
+```
+
+| kind | what it finds | pre-filled |
+|---|---|---|
+| `retake` | the end of a file is redone at the start of the next one — the earlier attempt is cut | y |
+| `repeat` | a phrase is abandoned and restarted inside a file | y |
+| `filler` | transcribed "еее", "ммм", "хм" | y |
+| `fragment` | a broken-off word ("фа…") | — |
+| `unclear` | several low-confidence words in a row — listen first | — |
+| `sound` | voiced, spectrally steady sound with no word (an untranscribed "еее") | — |
+
+Cut points are snapped to the quietest sustained spot within ±0.25 s of the word boundary, so cuts land in pauses.
+The `episode_time` column is computed from the current edit list without rendering.
+
 `render` writes `<name>.wav`, `<name>.mp3` and `<name>_report.json` (integrated loudness, true peak,
 LRA, drop-outs, where every edit landed in the output timeline).
 

@@ -2,7 +2,7 @@
 
 Status legend: ⬜ planned · 🟨 in progress · ✅ done
 
-## Milestone 1 — Engine (CLI) 🟨
+## Milestone 1 — Engine (CLI) ✅
 
 Goal: master a real multi-file podcast episode end to end from the command line.
 
@@ -18,16 +18,20 @@ Goal: master a real multi-file podcast episode end to end from the command line.
 - ✅ Review export: suggestions as a table (timecode, context, action) + import of decisions
 - ✅ Tests on synthetic audio (no real recordings in the repo)
 
-## Milestone 2 — UI
+## Milestone 2 — UI 🟨
 
 Design decisions: [DESIGN.md](DESIGN.md) — automatic first, pro audio-tool layout, studio-green palette, no rounded corners.
 
-
-- ⬜ Next.js app: project view, transcript editor with word selection
-- ⬜ Waveform with suggestion overlays (wavesurfer.js or custom canvas)
-- ⬜ Accept / reject suggestions, undo/redo
-- ⬜ Processing panel bound to module parameter schemas
+- ✅ Local engine API (`holos serve`): FastAPI on 127.0.0.1, token auth, job queue, SSE progress
+- ✅ Engine `process` pipeline: analyze → transcribe (skipped without ASR) → suggest, confident edits auto-applied
+- ✅ App scaffold: Next.js (static export) + Tauri v2 window, studio-green theme, IBM Plex
+- ✅ Import screen: drag & drop / file dialog, duplicates, settings (language, glossary, loudness, auto-apply), live progress
+- ✅ Questions: Cut / Keep buttons (Y / N shortcuts), decisions saved to the project
+- ⬜ Overview: whole-episode lanes (waveform, heat-map spectrogram, edits, loudness)
+- ⬜ Editor detail: zoomed lanes with words, cut handles, fine adjustment
 - ⬜ Playback of the edited timeline, A/B with original
+- ⬜ Export screen: formats, loudness presets, render job, report
+- ⬜ Undo / redo
 
 ## Milestone 3 — Desktop app
 

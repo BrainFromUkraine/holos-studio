@@ -151,6 +151,8 @@ class Project(BaseModel):
     analysis_settings: AnalysisSettings = AnalysisSettings()
     timeline_settings: TimelineSettings = TimelineSettings()
     chain: list[ChainStep] = Field(default_factory=default_chain)
+    # edit kinds applied without asking; everything else becomes a question for the user
+    auto_apply: list[str] = Field(default_factory=lambda: ["gain", "pause", "fill", "retake", "repeat", "filler"])
     export: ExportSettings = ExportSettings()
 
     # ---- persistence -------------------------------------------------

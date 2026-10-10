@@ -131,3 +131,11 @@ def test_cli_transcript_output(tmp_path):
     p.save(tmp_path / "t.holos")
     r = CliRunner().invoke(app, ["transcript", str(tmp_path / "t.holos")])
     assert r.exit_code == 0 and "[00:01.00] Привіт." in r.output and "[01:01.50] Як справи?" in r.output
+
+
+def test_load_16k(tmp_path):
+    from holos.asr import load_16k
+    x = noise(1.5, -20)
+    sf.write(tmp_path / "a.wav", np.stack([x, x], 1), SR, subtype="PCM_24")
+    y = load_16k(str(tmp_path / "a.wav"))
+    assert y.dtype == np.float32 and len(y) == 24000

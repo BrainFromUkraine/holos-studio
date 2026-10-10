@@ -1,0 +1,56 @@
+# --- Audio & media: never commit recordings or renders ---
+*.wav
+*.WAV
+*.mp3
+*.flac
+*.m4a
+*.aac
+*.ogg
+*.opus
+*.aif
+*.aiff
+media/
+renders/
+samples/
+test-audio/
+
+# --- Holos project caches ---
+*.holos-cache/
+.holos/
+
+# --- ASR models (downloaded at runtime) ---
+models/
+*.bin
+*.safetensors
+*.ggml
+*.gguf
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+*.log
+
+# --- Tauri / Rust ---
+app/src-tauri/target/
+target/
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.env
+.env.*

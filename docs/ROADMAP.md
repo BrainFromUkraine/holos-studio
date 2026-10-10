@@ -27,14 +27,14 @@ Design decisions: [DESIGN.md](DESIGN.md) — automatic first, pro audio-tool lay
 - ✅ App scaffold: Next.js (static export) + Tauri v2 window, studio-green theme, IBM Plex
 - ✅ Import screen: drag & drop / file dialog, duplicates, settings (language, glossary, loudness, auto-apply), live progress
 - ✅ Questions: Cut / Keep buttons (Y / N shortcuts), decisions saved to the project
-- ⬜ Overview: whole-episode lanes (waveform, heat-map spectrogram, edits, loudness)
-- ⬜ Editor detail: zoomed lanes with words, cut handles, fine adjustment
-- ⬜ Playback of the edited timeline, A/B with original
+- ✅ Editor: whole-episode overview + zoomable lanes (clips, waveform, heat-map spectrogram, words, edits, breaths, loudness)
+- ✅ Every edit visible and reversible; drag or nudge boundaries, snap to silence; own cuts from a waveform range or words
+- ✅ Playback: result (removed parts skipped) / original; listen to an edit with 2 s around it
 - ✅ Export screen: WAV / MP3, render job with progress, measured loudness, report
 - ✅ Chapters: anchored to words (follow edits), YouTube timecodes file, embedded in MP3 (ID3) and MP4
 - ✅ Export templates (plugins): video through your own script — [TEMPLATES.md](TEMPLATES.md)
 - ⬜ Loudness presets (podcast / YouTube / broadcast), FLAC, cover art and metadata
-- ⬜ Undo / redo
+- ✅ Undo / redo (history kept next to the project)
 
 ## Milestone 3 — Desktop app
 

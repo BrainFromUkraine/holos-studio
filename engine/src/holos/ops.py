@@ -183,7 +183,20 @@ def process_project(path: str | Path, progress: Progress = _noop) -> dict:
     else:
         progress("transcribe", 0, 0, "skipped: speech recognition not installed (uv sync --extra asr)")
         result["transcribe"] = {"skipped": True}
+    result["view"] = prepare_view(p, path, progress)
     return result
+
+
+def prepare_view(p: Project, path: str | Path, progress: Progress = _noop) -> dict:
+    """Waveform, spectrogram and loudness for the editor, so it opens instantly."""
+    from .view import prepare
+    t0 = time.time()
+    n = len(p.sources)
+    for i, s in enumerate(p.sources):
+        progress("view", i, n, Path(s.path).name)
+        prepare(p, path, s.id)
+    progress("view", n, n, "done")
+    return {"seconds": round(time.time() - t0, 1)}
 
 
 def summary(p: Project) -> dict:

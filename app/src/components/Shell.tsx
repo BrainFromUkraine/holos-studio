@@ -49,7 +49,7 @@ export function Shell({ children }: { children: ReactNode }) {
   }, []);
 
   const h = state.health;
-  const gpu = h?.cuda_devices ? "GPU · CUDA" : h?.asr ? "CPU" : "ASR не встановлено";
+  const gpu = !h?.asr ? "ASR не встановлено" : h.cuda_devices ? "GPU · CUDA" : h.cuda_devices === 0 ? "CPU" : "ASR";
 
   return (
     <EngineCtx.Provider value={state}>

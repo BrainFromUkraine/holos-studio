@@ -18,7 +18,7 @@ from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 from . import __version__
@@ -106,6 +106,20 @@ class ExportIn(BaseModel):
     preview: float = 0
 
 
+class EditIn(BaseModel):
+    path: str
+    op: str                                # status | adjust | cut | cut_words | delete | undo | redo
+    ids: list[str] | None = None
+    status: str | None = None
+    id: str | None = None
+    source: str | None = None
+    start: float | None = None
+    end: float | None = None
+    snap: str | bool | None = None
+    i0: int | None = None
+    i1: int | None = None
+
+
 class DecisionIn(BaseModel):
     path: str
     id: str
@@ -167,17 +181,26 @@ def create_app(token: str | None = None) -> FastAPI:
             ff = ffmpeg_path()
         except FFmpegError:
             ff = None
-        cuda = None
-        if ops.asr_available():
-            try:
-                import ctranslate2
-                from .asr import register_nvidia_dlls
-                register_nvidia_dlls()
-                cuda = ctranslate2.get_cuda_device_count()
-            except Exception:
-                cuda = 0
         return {"name": "holos-engine", "version": __version__, "ffmpeg": ff, "asr": ops.asr_available(),
-                "cuda_devices": cuda, "auth": token is not None}
+                "cuda_devices": cuda_devices(), "auth": token is not None}
+
+    gpu_probe: dict = {}
+
+    def cuda_devices() -> int | None:
+        """Number of CUDA GPUs, probed once (re-probing every few seconds was flaky while the GPU was busy).
+        None = unknown, so the UI never claims "CPU" just because a probe failed."""
+        if "n" in gpu_probe:
+            return gpu_probe["n"]
+        if not ops.asr_available():
+            return None
+        try:
+            import ctranslate2
+            from .asr import register_nvidia_dlls
+            register_nvidia_dlls()
+            gpu_probe["n"] = int(ctranslate2.get_cuda_device_count())
+            return gpu_probe["n"]
+        except Exception:
+            return None
 
     @app.post("/api/files/inspect", dependencies=[Depends(auth)])
     def inspect(body: FilesIn) -> list[dict]:
@@ -215,14 +238,105 @@ def create_app(token: str | None = None) -> FastAPI:
 
     @app.post("/api/projects/decision", dependencies=[Depends(auth)])
     def decision(body: DecisionIn) -> dict:
+        from . import editing
         p = load(body.path)
         status = {"cut": "accepted", "keep": "rejected"}.get(body.decision)
         if status is None:
             raise HTTPException(400, "decision must be 'cut' or 'keep'")
-        if p.set_status(status, ids={body.id}) == 0:  # type: ignore[arg-type]
-            raise HTTPException(404, f"edit not found: {body.id}")
-        p.save(body.path)
+        with edit_lock:
+            try:
+                editing.set_status(p, body.path, [body.id], status)
+            except editing.EditError as e:
+                raise HTTPException(404, str(e))
         return ops.summary(p)
+
+    # ---- editor --------------------------------------------------------------------------------
+    edit_lock = threading.Lock()
+
+    def source_of(p: Project, sid: str):
+        try:
+            return p.source(sid)
+        except KeyError:
+            raise HTTPException(404, f"source not found: {sid}")
+
+    def timeline_payload(p: Project, path: str) -> dict:
+        from . import editing, view
+        return {**view.timeline(p, path), "history": editing.history_state(path)}
+
+    @app.get("/api/projects/timeline", dependencies=[Depends(auth)])
+    def get_timeline(path: str) -> dict:
+        return timeline_payload(load(path), path)
+
+    @app.get("/api/projects/peaks", dependencies=[Depends(auth)])
+    def get_peaks(path: str, source: str) -> Response:
+        from . import view
+        p = load(path)
+        source_of(p, source)
+        return Response(view.peaks(p, path, source), media_type="application/octet-stream",
+                        headers={"X-Peaks-Rate": str(view.PEAKS_RATE), "Cache-Control": "max-age=3600",
+                                 "Access-Control-Expose-Headers": "X-Peaks-Rate"})
+
+    @app.get("/api/projects/spectrogram", dependencies=[Depends(auth)])
+    def get_spectrogram(path: str, source: str) -> Response:
+        from . import view
+        p = load(path)
+        source_of(p, source)
+        return Response(view.spectrogram_png(p, path, source), media_type="image/png",
+                        headers={"Cache-Control": "max-age=3600"})
+
+    @app.get("/api/spectrogram/legend")
+    def get_legend() -> Response:
+        from . import view
+        return Response(view.legend_png(), media_type="image/png", headers={"Cache-Control": "max-age=86400"})
+
+    @app.get("/api/projects/loudness", dependencies=[Depends(auth)])
+    def get_loudness(path: str, source: str) -> dict:
+        from . import view
+        p = load(path)
+        source_of(p, source)
+        return {"hop": view.LOUD_HOP, "values": view.loudness(p, path, source)}
+
+    @app.get("/api/projects/audio", dependencies=[Depends(auth)])
+    def get_audio(path: str, source: str) -> FileResponse:
+        p = load(path)
+        s = source_of(p, source)
+        if not Path(s.path).is_file():
+            raise HTTPException(404, f"recording missing: {s.path}")
+        return FileResponse(s.path, media_type="audio/wav")
+
+    @app.post("/api/projects/edit", dependencies=[Depends(auth)])
+    def edit(body: EditIn) -> dict:
+        from . import editing
+        p = load(body.path)
+        info: dict = {}
+        with edit_lock:
+            try:
+                if body.op == "status":
+                    editing.set_status(p, body.path, body.ids or ([body.id] if body.id else []), body.status or "")
+                elif body.op == "adjust":
+                    snap = body.snap if isinstance(body.snap, str) else None
+                    editing.adjust(p, body.path, body.id or "", body.start, body.end, snap)
+                elif body.op == "cut":
+                    if body.source is None or body.start is None or body.end is None:
+                        raise editing.EditError("cut needs source, start and end")
+                    source_of(p, body.source)
+                    info["id"] = editing.add_cut(p, body.path, body.source, body.start, body.end,
+                                                 snap=body.snap is not False)
+                elif body.op == "cut_words":
+                    if body.source is None or body.i0 is None or body.i1 is None:
+                        raise editing.EditError("cut_words needs source, i0 and i1")
+                    info["id"] = editing.cut_words(p, body.path, body.source, body.i0, body.i1)
+                elif body.op == "delete":
+                    editing.delete(p, body.path, body.id or "")
+                elif body.op == "undo":
+                    info["undone"] = editing.undo(p, body.path)
+                elif body.op == "redo":
+                    info["redone"] = editing.redo(p, body.path)
+                else:
+                    raise editing.EditError(f"unknown op: {body.op}")
+            except editing.EditError as e:
+                raise HTTPException(400, str(e))
+        return {**timeline_payload(p, body.path), **info}
 
     @app.put("/api/projects/chapters", dependencies=[Depends(auth)])
     def put_chapters(body: ChaptersIn) -> dict:

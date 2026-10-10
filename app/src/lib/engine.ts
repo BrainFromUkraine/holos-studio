@@ -1,3 +1,5 @@
+import type { Timeline } from "./timeline";
+
 // Client for the local Holos engine API (`holos serve`).
 
 export const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL ?? "http://127.0.0.1:8765";
@@ -117,6 +119,20 @@ export type ExportResult = {
   preview: boolean;
 };
 
+export type EditRequest = {
+  path: string;
+  op: "status" | "adjust" | "cut" | "cut_words" | "delete" | "undo" | "redo";
+  ids?: string[];
+  status?: "accepted" | "rejected" | "suggested";
+  id?: string;
+  source?: string;
+  start?: number;
+  end?: number;
+  snap?: "start" | "end" | "both" | boolean;
+  i0?: number;
+  i1?: number;
+};
+
 export type Job = {
   id: string;
   kind: string;
@@ -185,6 +201,21 @@ export const engine = {
   setChapters: (path: string, chapters: { time: number; title: string }[]) =>
     call<Summary>("PUT", "/api/projects/chapters", { path, chapters }),
   exportProject: (req: ExportRequest) => call<Job>("POST", "/api/projects/export", req),
+  timeline: (path: string) => call<Timeline>("GET", `/api/projects/timeline?path=${encodeURIComponent(path)}`),
+  edit: (req: EditRequest) => call<Timeline & { id?: string; undone?: string | null; redone?: string | null }>("POST", "/api/projects/edit", req),
+  /** URL for <audio>/<img> (they can't send headers, so the token goes in the query). */
+  assetUrl(kind: "audio" | "spectrogram", path: string, source: string): string {
+    return `${ENGINE_URL}/api/projects/${kind}?path=${encodeURIComponent(path)}&source=${encodeURIComponent(source)}&token=${encodeURIComponent(token())}`;
+  },
+  async peaks(path: string, source: string): Promise<{ rate: number; data: Int8Array }> {
+    const res = await fetch(`${ENGINE_URL}/api/projects/peaks?path=${encodeURIComponent(path)}&source=${encodeURIComponent(source)}`, {
+      headers: { "X-Holos-Token": token() },
+    });
+    if (!res.ok) throw new Error(`peaks ${res.status}`);
+    return { rate: Number(res.headers.get("X-Peaks-Rate") ?? 200), data: new Int8Array(await res.arrayBuffer()) };
+  },
+  loudness: (path: string, source: string) =>
+    call<{ hop: number; values: number[] }>("GET", `/api/projects/loudness?path=${encodeURIComponent(path)}&source=${encodeURIComponent(source)}`),
   /** Streams job progress; returns a function that stops listening. */
   watch(jobId: string, onUpdate: (j: Job) => void): () => void {
     const es = new EventSource(`${ENGINE_URL}/api/jobs/${jobId}/events?token=${encodeURIComponent(token())}`);

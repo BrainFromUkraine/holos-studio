@@ -1,0 +1,153 @@
+// Plays the recordings straight from the engine, jumping over removed parts in "result" mode.
+// It previews the edit (cuts, pauses, trimmed silence); processing (EQ, compression, loudness) is heard after export.
+
+import { engine } from "@/lib/engine";
+import { keptPieces, type Timeline } from "@/lib/timeline";
+
+type Piece = { sid: string; a: number; b: number };
+export type Pos = { sid: string; t: number };
+
+export class Player {
+  private audio: HTMLAudioElement;
+  private plan: Piece[] = [];
+  private idx = 0;
+  private sid: string | null = null;
+  private raf = 0;
+  private stopAt: Pos | null = null;
+  private tl: Timeline | null = null;
+  playing = false;
+  mode: "result" | "original" = "result";
+  onTick: (p: Pos) => void = () => {};
+  onState: (playing: boolean) => void = () => {};
+
+  constructor(private path: string) {
+    this.audio = new Audio();
+    this.audio.preload = "auto";
+    this.audio.addEventListener("ended", () => this.next());
+  }
+
+  setTimeline(tl: Timeline) {
+    this.tl = tl;
+    this.rebuild();
+  }
+
+  setMode(m: "result" | "original") {
+    this.mode = m;
+    this.rebuild();
+  }
+
+  private rebuild() {
+    if (!this.tl) return;
+    this.plan = [];
+    for (const s of this.tl.sources) {
+      const pieces: [number, number][] = this.mode === "result" ? keptPieces(s) : [[0, s.duration]];
+      for (const [a, b] of pieces) if (b - a > 0.005) this.plan.push({ sid: s.id, a, b });
+    }
+    if (this.playing) {
+      const pos = this.position();
+      if (pos) this.idx = this.find(pos);
+    }
+  }
+
+  private find(p: Pos): number {
+    const order = this.tl?.sources.map((s) => s.id) ?? [];
+    const si = order.indexOf(p.sid);
+    for (let i = 0; i < this.plan.length; i++) {
+      const pc = this.plan[i];
+      const pi = order.indexOf(pc.sid);
+      if (pi > si || (pi === si && pc.b > p.t + 0.001)) return i;
+    }
+    return this.plan.length;
+  }
+
+  position(): Pos | null {
+    return this.sid ? { sid: this.sid, t: this.audio.currentTime } : null;
+  }
+
+  private async load(sid: string, t: number) {
+    if (this.sid !== sid) {
+      this.sid = sid;
+      this.audio.src = engine.assetUrl("audio", this.path, sid);
+      await new Promise<void>((res, rej) => {
+        const ok = () => { cleanup(); res(); };
+        const bad = () => { cleanup(); rej(new Error("audio")); };
+        const cleanup = () => { this.audio.removeEventListener("loadedmetadata", ok); this.audio.removeEventListener("error", bad); };
+        this.audio.addEventListener("loadedmetadata", ok);
+        this.audio.addEventListener("error", bad);
+      });
+    }
+    this.audio.currentTime = t;
+  }
+
+  /** Play from a source position; `until` stops there (used for "listen to this edit"). */
+  async play(from: Pos, until: Pos | null = null) {
+    this.stopAt = until;
+    this.idx = this.find(from);
+    const pc = this.plan[this.idx];
+    if (!pc) return;
+    const t = pc.sid === from.sid && from.t >= pc.a ? from.t : pc.a;
+    try {
+      await this.load(pc.sid, t);
+      this.audio.volume = 1;
+      await this.audio.play();
+    } catch {
+      return;
+    }
+    this.playing = true;
+    this.onState(true);
+    cancelAnimationFrame(this.raf);
+    const tick = () => {
+      if (!this.playing) return;
+      this.watch();
+      const p = this.position();
+      if (p) this.onTick(p);
+      this.raf = requestAnimationFrame(tick);
+    };
+    this.raf = requestAnimationFrame(tick);
+  }
+
+  pause() {
+    this.playing = false;
+    this.audio.pause();
+    cancelAnimationFrame(this.raf);
+    this.onState(false);
+  }
+
+  private watch() {
+    const pc = this.plan[this.idx];
+    const t = this.audio.currentTime;
+    if (this.stopAt && this.sid === this.stopAt.sid && t >= this.stopAt.t) {
+      this.pause();
+      return;
+    }
+    if (pc && this.sid === pc.sid && t >= pc.b - 0.004) this.next();
+  }
+
+  private async next() {
+    this.idx += 1;
+    const pc = this.plan[this.idx];
+    if (!pc) {
+      this.pause();
+      return;
+    }
+    if (pc.sid === this.sid) {
+      // jump over a removed part; a tiny dip avoids a click at the splice
+      this.audio.volume = 0.2;
+      this.audio.currentTime = pc.a;
+      setTimeout(() => (this.audio.volume = 1), 12);
+      return;
+    }
+    this.audio.pause();
+    try {
+      await this.load(pc.sid, pc.a);
+      if (this.playing) await this.audio.play();
+    } catch {
+      this.pause();
+    }
+  }
+
+  destroy() {
+    this.pause();
+    this.audio.src = "";
+  }
+}

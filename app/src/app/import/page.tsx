@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { EngineBanner, useEngine } from "@/components/Shell";
 import { currentProject, engine, fmtDuration, type FileInfo, type Job, type Summary } from "@/lib/engine";
@@ -25,6 +26,7 @@ const STEPS = [
   { key: "analyze", label: "Аналіз звуку" },
   { key: "transcribe", label: "Транскрипція" },
   { key: "suggest", label: "Пошук дублів і повторів" },
+  { key: "view", label: "Підготовка редактора" },
 ];
 
 type Phase = "pick" | "running" | "done" | "error";
@@ -47,6 +49,7 @@ export default function ImportPage() {
   const { health } = useEngine();
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [busy, setBusy] = useState(false);
+  const router = useRouter();
   const [err, setErr] = useState<string | null>(null);
   const [hover, setHover] = useState(false);
   const [pasted, setPasted] = useState("");
@@ -113,6 +116,7 @@ export default function ImportPage() {
         if (u.state === "done") {
           setSummary(await engine.summary(saved));
           setPhase("done");
+          router.push("/edit/");
         } else if (u.state === "error") {
           setErr(u.error);
           setPhase("error");
@@ -129,11 +133,11 @@ export default function ImportPage() {
 
   const stepState = (key: string): "done" | "now" | "wait" | "skip" => {
     if (phase === "pick") return "wait";
-    if (asrSkipped && (key === "transcribe" || key === "suggest") && (phase === "done" || job?.stage === "transcribe")) return "skip";
-    if (key === "create") return "done";
-    if (phase === "done") return "done";
     const order = STEPS.map((s) => s.key);
     const cur = job?.stage || "analyze";
+    if (asrSkipped && (key === "transcribe" || key === "suggest") && (phase === "done" || order.indexOf(cur) >= order.indexOf("transcribe"))) return "skip";
+    if (key === "create") return "done";
+    if (phase === "done") return "done";
     if (order.indexOf(key) < order.indexOf(cur)) return "done";
     return key === cur ? "now" : "wait";
   };
@@ -143,14 +147,16 @@ export default function ImportPage() {
     if (phase === "done") return { pct: 100, text: "✓", color: "var(--text2)" };
     const stage = job?.stage ?? "analyze";
     const done = job?.done ?? 0;
-    const base = { analyze: 0, transcribe: 33, suggest: 66 }[stage] ?? 0;
-    if (i < done) return { pct: base + 33, text: stage === "transcribe" ? "розпізнано" : stage === "analyze" ? "проаналізовано" : "перевірено", color: "var(--text2)" };
-    if (i === done) return { pct: base + 15, text: stage === "transcribe" ? "транскрипція…" : stage === "analyze" ? "аналіз…" : "пошук…", color: "var(--bright)" };
+    const base = ({ analyze: 0, transcribe: 25, suggest: 50, view: 75 } as Record<string, number>)[stage] ?? 0;
+    const doneText: Record<string, string> = { analyze: "проаналізовано", transcribe: "розпізнано", suggest: "перевірено", view: "готово" };
+    const nowText: Record<string, string> = { analyze: "аналіз…", transcribe: "транскрипція…", suggest: "пошук…", view: "хвиля і спектр…" };
+    if (i < done) return { pct: base + 25, text: doneText[stage] ?? "", color: "var(--text2)" };
+    if (i === done) return { pct: base + 12, text: nowText[stage] ?? "", color: "var(--bright)" };
     return { pct: base, text: "у черзі", color: "var(--muted)" };
   };
 
   const overall = phase === "done" ? 100 : phase === "running" && job
-    ? Math.round((({ analyze: 0, transcribe: 1, suggest: 2 } as Record<string, number>)[job.stage] ?? 0) * 33 + (job.total ? (job.done / job.total) * 33 : 0))
+    ? Math.round((({ analyze: 0, transcribe: 1, suggest: 2, view: 3 } as Record<string, number>)[job.stage] ?? 0) * 25 + (job.total ? (job.done / job.total) * 25 : 0))
     : 0;
 
   const applied = summary ? Object.values(summary.counts).reduce((a, c) => a + (c.accepted ?? 0), 0) : 0;

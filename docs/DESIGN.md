@@ -39,7 +39,8 @@ lives in the project's design canvas; this file is the source of truth for the i
 | `cutBg` / `cutBorder` / `cutText` | `#2A1111` / `#6E2222` / `#FFA3A3` | cut blocks and the Cut button |
 | `breath` | `#7A8A7F` | breath markers; block `#161B17` / `#33413A` / `#B4C4B9` |
 
-Spectrogram colormap (violet): `#0a0b0a → #140b2a → #2e1766 → #5b34c9 → #8b5cf6 → #c4b5fd → #f5f3ff` (mel scale, 60 Hz–12 kHz).
+Spectrogram: intensity heat map (like iZotope RX) `#000000 → #160a33 → #3b137a → #7a24b8 → #c2329e → #ff5e3a → #ffb43c → #fff6d8`,
+80 dB range, mel frequency scale with grid lines and labels at 100 / 250 / 500 / 1k / 2k / 4k / 8k Hz and a −80…0 dB legend.
 
 ## Type
 

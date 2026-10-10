@@ -30,6 +30,25 @@ def norm(w: str) -> str:
     return _PUNCT.sub("", w).strip("-'")
 
 
+_LAT = {"sh": "ш", "ch": "ч", "zh": "ж", "kh": "х", "ts": "ц", "ya": "я", "yu": "ю", "oo": "у", "ee": "і",
+        "a": "а", "b": "б", "c": "к", "d": "д", "e": "е", "f": "ф", "g": "г", "h": "х", "i": "і", "j": "дж",
+        "k": "к", "l": "л", "m": "м", "n": "н", "o": "о", "p": "п", "q": "к", "r": "р", "s": "с", "t": "т",
+        "u": "у", "v": "в", "w": "в", "x": "кс", "y": "і", "z": "з"}
+_UA_FOLD = str.maketrans({"и": "і", "ї": "і", "й": "і", "є": "е", "ґ": "г", "щ": "ш", "ь": None, "'": None, "-": None})
+
+
+def sound_key(text: str) -> str:
+    """Rough phonetic spelling so 'CrowdSupply' and 'крауд саплай' compare as similar."""
+    t = norm(text).replace(" ", "")
+    out, i = [], 0
+    while i < len(t):
+        if t[i:i + 2] in _LAT:
+            out.append(_LAT[t[i:i + 2]]); i += 2
+        else:
+            out.append(_LAT.get(t[i], t[i])); i += 1
+    return "".join(out).translate(_UA_FOLD)
+
+
 def is_fragment(w: str) -> bool:
     return w.rstrip().endswith(("...", "…"))
 
@@ -110,8 +129,16 @@ def find_retake(prev: list[Word], nxt: list[Word], head: int = 8, min_match: int
             continue
         sm = SequenceMatcher(a=seg, b=B, autojunk=False)
         m = sum(b.size for b in sm.get_matching_blocks())
-        starts_together = sm.get_matching_blocks()[0].a <= 1 and sm.get_matching_blocks()[0].b <= 1
-        if m >= min_match and starts_together and sm.ratio() >= 0.45:
+        first = sm.get_matching_blocks()[0]
+        # the retake starts where the next file starts; an extra leading word is allowed only on both sides
+        # ("І на …" / "А на …"), never only on this side ("світі. Це був …" / "Це був …")
+        starts_together = first.b <= 1 and first.a <= first.b
+        # words can be spelled differently between takes (Latin vs Cyrillic) — compare by sound too
+        ka, kb = sound_key(" ".join(prev[q].w for q in range(i, min(len(prev), i + len(B))))), \
+            sound_key(" ".join(w.w for w in nxt[:head]))
+        L = min(len(ka), len(kb))
+        char_ratio = SequenceMatcher(a=ka[:L], b=kb[:L], autojunk=False).ratio() if L >= 12 else 0.0
+        if m >= min_match and starts_together and (sm.ratio() >= 0.45 or char_ratio >= 0.55):
             if best is None or m > best[1]:
                 best = (i, m)
     return best

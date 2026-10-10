@@ -20,6 +20,9 @@ Goal: master a real multi-file podcast episode end to end from the command line.
 
 ## Milestone 2 — UI
 
+Design decisions: [DESIGN.md](DESIGN.md) — automatic first, pro audio-tool layout, studio-green palette, no rounded corners.
+
+
 - ⬜ Next.js app: project view, transcript editor with word selection
 - ⬜ Waveform with suggestion overlays (wavesurfer.js or custom canvas)
 - ⬜ Accept / reject suggestions, undo/redo

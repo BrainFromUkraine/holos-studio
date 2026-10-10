@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import sys
 import time
@@ -15,7 +16,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable, Protocol
 
+import numpy as np
+from scipy.signal import resample_poly
+
+from ..io import load_mono
 from ..project import AsrSettings, Word
+
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")   # harmless on Windows without Developer Mode
 
 # Fillers in the prompt nudge Whisper to transcribe disfluencies verbatim instead of cleaning them up.
 FILLER_PROMPT_UK = "Ну, еее, тобто, ммм... як би це сказати, ну, ось. Е-е, а-а, хм."
@@ -26,6 +33,15 @@ def build_prompt(s: AsrSettings) -> str:
     if s.glossary:
         parts.append("Терміни: " + ", ".join(s.glossary) + ".")
     return " ".join(parts)
+
+
+def load_16k(path: str) -> np.ndarray:
+    """Mono float32 at 16 kHz, as Whisper expects."""
+    x, sr = load_mono(path)
+    if sr != 16000:
+        g = math.gcd(sr, 16000)
+        x = resample_poly(x, 16000 // g, sr // g)
+    return x.astype(np.float32)
 
 
 def register_nvidia_dlls() -> list[str]:
@@ -76,8 +92,9 @@ class WhisperTranscriber:
 
     def __call__(self, path: str, settings: AsrSettings) -> tuple[list[Word], dict]:
         t0 = time.time()
+        audio = load_16k(path)   # decode ourselves: no dependency on PyAV's API
         segments, info = self.model.transcribe(
-            path, language=settings.language, word_timestamps=True, beam_size=settings.beam_size,
+            audio, language=settings.language, word_timestamps=True, beam_size=settings.beam_size,
             initial_prompt=build_prompt(settings), condition_on_previous_text=False,
             vad_filter=False, temperature=0.0)
         words: list[Word] = []

@@ -34,6 +34,22 @@ uv run holos info episode.holos
 uv run holos render episode.holos -o renders
 ```
 
+## Transcription (faster-whisper)
+
+```bash
+# once: speech recognition + NVIDIA CUDA 12 libraries (cuBLAS, cuDNN 9) as pip wheels
+uv sync --extra asr --extra gpu
+
+# word-level transcript of every source; the model downloads on first run (~1.6 GB)
+uv run holos transcribe episode.holos --glossary "ESP32, LoRa, KiCad"
+uv run holos transcript episode.holos -o transcript.txt
+```
+
+- Default model `large-v3-turbo`, language `uk`, GPU `float16` when CUDA is available, otherwise CPU `int8`.
+- Results are cached in `<project>.holos-cache/asr/` per audio content and settings, so re-runs are instant.
+- The glossary is saved in the project and passed to Whisper as a prompt, together with filler examples
+  that nudge it to keep disfluencies ("еее", "ну") instead of cleaning them up.
+
 `render` writes `<name>.wav`, `<name>.mp3` and `<name>_report.json` (integrated loudness, true peak,
 LRA, drop-outs, where every edit landed in the output timeline).
 

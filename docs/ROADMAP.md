@@ -10,7 +10,7 @@ Goal: master a real multi-file podcast episode end to end from the command line.
 - ✅ Project file model (`*.holos`) with load/save and validation
 - ✅ Import: multiple source files, ordering, duplicate detection (hash)
 - ✅ Analysis: VAD, breaths, pauses, room tone, gate drop-outs
-- ⬜ ASR: faster-whisper (CUDA) with word timestamps, cached per source
+- 🟨 ASR: faster-whisper (CUDA) with word timestamps, cached per source
 - ⬜ Suggestions: filler words, repeats / false starts, long pauses, breaths
 - ✅ Edit list → timeline rendering with crossfades
 - ✅ Processing chain as modules (ported from the proven pipeline)

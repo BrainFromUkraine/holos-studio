@@ -100,3 +100,34 @@ def test_cli_new_sorts_and_dedupes(tmp_path):
     assert len(p.sources) == 2
     assert p.sources[0].path.endswith("POD00008.WAV")
     assert p.sources[1].path.endswith("POD00014.WAV")   # later copy skipped as duplicate
+
+
+def test_asr_cache_and_prompt(tmp_path):
+    from holos.asr import build_prompt, transcribe_sources
+    from holos.project import AsrSettings, Word
+    calls = []
+
+    def fake(path, settings):
+        calls.append(path)
+        return [Word(w="Привіт", start=0.1, end=0.4, p=0.9), Word(w="ESP32.", start=0.5, end=0.9)], \
+            {"audio_s": 1.0, "seconds": 0.1, "model": settings.model}
+
+    s = AsrSettings(glossary=["ESP32", "LoRa"])
+    assert "ESP32" in build_prompt(s) and "еее" in build_prompt(s)
+    items = [("s1", "a.wav", "ab" * 32)]
+    r1 = transcribe_sources(items, s, tmp_path, transcriber_factory=lambda: fake)
+    r2 = transcribe_sources(items, s, tmp_path, transcriber_factory=lambda: fake)
+    assert len(calls) == 1 and r2["s1"][1]["cached"] and r2["s1"][0][1].w == "ESP32."
+    s.glossary = ["KiCad"]                       # different settings → new cache entry
+    transcribe_sources(items, s, tmp_path, transcriber_factory=lambda: fake)
+    assert len(calls) == 2
+
+
+def test_cli_transcript_output(tmp_path):
+    from holos.project import Source, Word
+    p = Project(name="t")
+    p.sources.append(Source(id="s1", path=str(tmp_path / "POD1.WAV"), sha256="x", sr=SR, channels=2, duration=3))
+    p.transcript["s1"] = [Word(w="Привіт.", start=1.0, end=1.4), Word(w="Як", start=61.5, end=61.7), Word(w="справи?", start=61.7, end=62.0)]
+    p.save(tmp_path / "t.holos")
+    r = CliRunner().invoke(app, ["transcript", str(tmp_path / "t.holos")])
+    assert r.exit_code == 0 and "[00:01.00] Привіт." in r.output and "[01:01.50] Як справи?" in r.output

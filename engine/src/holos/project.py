@@ -37,6 +37,22 @@ class SourceAnalysis(BaseModel):
     room_tone: list[tuple[float, float]] = []
 
 
+class Word(BaseModel):
+    w: str
+    start: float
+    end: float
+    p: float = 1.0
+
+
+class AsrSettings(BaseModel):
+    model: str = "large-v3-turbo"
+    language: str = "uk"
+    glossary: list[str] = []          # English terms etc. to keep spelled correctly
+    device: Literal["auto", "cuda", "cpu"] = "auto"
+    compute_type: str = "auto"
+    beam_size: int = 5
+
+
 class Clip(BaseModel):
     source: str
     start: float
@@ -125,6 +141,9 @@ class Project(BaseModel):
     analysis: dict[str, SourceAnalysis] = {}
     timeline: list[Clip] = []
     edits: list[Edit] = []
+    transcript: dict[str, list[Word]] = {}
+    transcript_meta: dict[str, dict[str, Any]] = {}
+    asr: AsrSettings = AsrSettings()
     analysis_settings: AnalysisSettings = AnalysisSettings()
     timeline_settings: TimelineSettings = TimelineSettings()
     chain: list[ChainStep] = Field(default_factory=default_chain)

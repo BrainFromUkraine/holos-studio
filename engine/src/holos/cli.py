@@ -86,6 +86,63 @@ def analyze(project: Path,
 
 
 @app.command()
+def transcribe(project: Path,
+               model: Annotated[Optional[str], typer.Option(help="Whisper model, e.g. large-v3-turbo, large-v3.")] = None,
+               language: Annotated[Optional[str], typer.Option(help="Language code, e.g. uk.")] = None,
+               device: Annotated[Optional[str], typer.Option(help="auto | cuda | cpu")] = None,
+               glossary: Annotated[Optional[str], typer.Option(
+                   help="Comma-separated terms to spell correctly, e.g. 'ESP32, LoRa, KiCad'. Saved in the project.")] = None) -> None:
+    """Transcribe every source with word timestamps (cached per audio content)."""
+    from .asr import transcribe_sources
+    p = Project.load(project)
+    if model: p.asr.model = model
+    if language: p.asr.language = language
+    if device: p.asr.device = device  # type: ignore[assignment]
+    if glossary is not None:
+        p.asr.glossary = [g.strip() for g in glossary.split(",") if g.strip()]
+    cache = project.parent / f"{project.stem}.holos-cache" / "asr"
+    t0 = time.time()
+    res = transcribe_sources([(s.id, s.path, s.sha256) for s in p.sources], p.asr, cache,
+                             log=lambda m: _echo(f"  {m}"))
+    for sid, (words, meta) in res.items():
+        p.transcript[sid] = words
+        p.transcript_meta[sid] = meta
+    p.save(project)
+    n = sum(len(w) for w, _ in res.values())
+    audio = sum(s.duration for s in p.sources)
+    _echo(f"Transcribed {len(res)} sources, {n} words, {audio / 60:.1f} min audio in {time.time() - t0:.0f}s")
+
+
+@app.command()
+def transcript(project: Path,
+               out: Annotated[Optional[Path], typer.Option("--out", "-o", help="Write to a text file instead of the console.")] = None) -> None:
+    """Readable transcript with per-source timecodes."""
+    p = Project.load(project)
+    lines = []
+    for s in p.sources:
+        words = p.transcript.get(s.id)
+        if not words:
+            continue
+        lines.append(f"\n=== {Path(s.path).name} ===")
+        line, t_line = [], None
+        for w in words:
+            if t_line is None:
+                t_line = w.start
+            line.append(w.w)
+            if w.w.endswith((".", "?", "!")) or len(line) >= 18:
+                lines.append(f"[{int(t_line // 60):02d}:{t_line % 60:05.2f}] " + " ".join(line))
+                line, t_line = [], None
+        if line and t_line is not None:
+            lines.append(f"[{int(t_line // 60):02d}:{t_line % 60:05.2f}] " + " ".join(line))
+    text = "\n".join(lines).strip() + "\n"
+    if out:
+        out.write_text(text, encoding="utf-8")
+        _echo(f"Wrote {out}")
+    else:
+        _echo(text)
+
+
+@app.command()
 def edits(project: Path,
           type: Annotated[Optional[str], typer.Option("--type", help="gain | pause | fill | cut")] = None,
           status: Annotated[Optional[str], typer.Option(help="suggested | accepted | rejected")] = None) -> None:

@@ -45,6 +45,76 @@ export type Summary = {
   counts: Record<string, Record<string, number>>;
   questions: Question[];
   settings: { language: string; glossary: string[]; model: string; target_lufs: number | null; auto_apply: string[] };
+  chapters: Chapter[];
+  chapter_warnings: string[];
+  export: ExportSettings;
+};
+
+export type Chapter = { title: string; time: number; end: number; origin: string; source: string; at: number };
+
+export type ExportSettings = {
+  wav: boolean;
+  wav_bits: number;
+  channels: number;
+  mp3: boolean;
+  mp3_kbps: number;
+  chapters_txt: boolean;
+  chapters_embed: boolean;
+  video: { template: string | null; params: Record<string, unknown> };
+};
+
+export type TemplateParam = {
+  key: string;
+  label: string;
+  type: "file" | "int" | "float" | "choice" | "bool" | "text";
+  arg: string;
+  required: boolean;
+  default: unknown;
+  help: string;
+  min: number | null;
+  max: number | null;
+  step: number | null;
+  options: { value: string; label: string }[];
+  filters: string[];
+  auto: "increment" | null;
+};
+
+export type TemplateInfo = {
+  id: string;
+  name: string;
+  kind: string;
+  description: string;
+  params: TemplateParam[];
+  preview: boolean;
+  builtin: boolean;
+  dir: string;
+  missing: string[];
+  install: string;
+  ready: boolean;
+  initial: Record<string, unknown>;
+};
+
+export type ExportRequest = {
+  path: string;
+  out_dir?: string | null;
+  name?: string | null;
+  wav?: boolean;
+  mp3?: boolean;
+  chapters_txt?: boolean;
+  chapters_embed?: boolean;
+  video?: { template: string | null; params: Record<string, unknown> } | null;
+  preview?: number;
+};
+
+export type ExportResult = {
+  out_dir: string;
+  files: Record<string, string>;
+  chapters: Chapter[];
+  warnings: string[];
+  duration_s: number | null;
+  measured: { integrated_lufs?: number; true_peak_dbtp?: number; lra_lu?: number } | null;
+  seconds: number;
+  preview: boolean;
 };
 
 export type Job = {
@@ -105,6 +175,11 @@ export const engine = {
   process: (path: string) => call<Job>("POST", "/api/projects/process", { path }),
   decide: (path: string, id: string, decision: "cut" | "keep") =>
     call<Summary>("POST", "/api/projects/decision", { path, id, decision }),
+  templates: (path?: string) =>
+    call<{ user_dir: string; templates: TemplateInfo[] }>("GET", `/api/templates${path ? `?path=${encodeURIComponent(path)}` : ""}`),
+  setChapters: (path: string, chapters: { time: number; title: string }[]) =>
+    call<Summary>("PUT", "/api/projects/chapters", { path, chapters }),
+  exportProject: (req: ExportRequest) => call<Job>("POST", "/api/projects/export", req),
   /** Streams job progress; returns a function that stops listening. */
   watch(jobId: string, onUpdate: (j: Job) => void): () => void {
     const es = new EventSource(`${ENGINE_URL}/api/jobs/${jobId}/events?token=${encodeURIComponent(token())}`);
@@ -146,3 +221,23 @@ export const currentProject = {
     } catch {}
   },
 };
+
+/** "75", "1:15", "01:15.5", "1:01:15" → seconds; null if not a time. */
+export function parseTimecode(v: string): number | null {
+  const s = v.trim();
+  if (/^\d+(\.\d+)?$/.test(s)) return Number(s);
+  const parts = s.split(":");
+  if (parts.length < 2 || parts.length > 3 || !parts.every((x) => /^\d+(\.\d+)?$/.test(x))) return null;
+  return parts.reduce((acc, x) => acc * 60 + Number(x), 0);
+}
+
+/** YouTube style: 00:00, 1:02:03 for long episodes. */
+export function fmtClock(s: number, hours = false): string {
+  const t = Math.floor(s);
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const sec = t % 60;
+  const mm = String(m).padStart(2, "0");
+  const ss = String(sec).padStart(2, "0");
+  return hours || h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}

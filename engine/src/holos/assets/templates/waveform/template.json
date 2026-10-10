@@ -1,0 +1,17 @@
+{
+ "id": "waveform",
+ "name": "Waveform (example)",
+ "kind": "video",
+ "description": "Minimal example: background image or solid colour with an animated waveform. Copy this folder to make your own template.",
+ "entry": "waveform.py",
+ "imports": ["soundfile"],
+ "args": {"audio": "--audio", "out": "--out", "preview": "--preview"},
+ "params": [
+  {"key": "background", "label": "Background image (16:9)", "type": "file", "arg": "--background", "filters": ["png", "jpg", "jpeg"], "help": "Optional. Without it the background is black."},
+  {"key": "color", "label": "Waveform colour", "type": "choice", "arg": "--color", "default": "22D3EE",
+   "options": [{"value": "22D3EE", "label": "Cyan"}, {"value": "3DDC84", "label": "Green"}, {"value": "FFFFFF", "label": "White"}]},
+  {"key": "height", "label": "Waveform height, px", "type": "int", "arg": "--height", "default": 320, "min": 80, "max": 900, "step": 10}
+ ],
+ "progress": {"regex": "^\\s*(\\d+(?:\\.\\d+)?) / (\\d+(?:\\.\\d+)?) s", "done": 1, "total": 2},
+ "output": "mp4"
+}

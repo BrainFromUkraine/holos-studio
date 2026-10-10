@@ -15,6 +15,7 @@ Making a spoken-word podcast sound professional usually means hours in a DAW: re
 - **Pro voice chain, one click.** Breath attenuation, pause tightening, de-click, de-ess, EQ, compression, and loudness normalisation to podcast standards (-16 LUFS, -1 dBTP).
 - **Non-destructive.** Source recordings are never modified; a project is a JSON edit list you can undo at any point.
 - **AI as a collaborator, not a black box.** Holos exposes an [MCP](https://modelcontextprotocol.io) server, so Claude (or any MCP-capable assistant) can inspect and edit a project with your approval.
+- **Export your way.** WAV / MP3 with chapters, timecodes for YouTube, and video through your own [templates](docs/TEMPLATES.md).
 - **Local first.** Transcription runs on your own GPU with Whisper; your recordings never leave your computer unless you choose to.
 
 ## Planned architecture
@@ -22,7 +23,7 @@ Making a spoken-word podcast sound professional usually means hours in a DAW: re
 | Part | Tech | Role |
 |---|---|---|
 | `engine/` | Python, faster-whisper (CUDA), NumPy/SciPy, FFmpeg, FastAPI | Audio analysis & processing, transcription, rendering, local API |
-| `engine/holos/mcp/` | Python MCP SDK | MCP server on top of the engine |
+| `engine/src/holos/mcp_server.py` | Python MCP SDK | MCP server on top of the engine — [docs/MCP.md](docs/MCP.md) |
 | `app/` | Tauri v2, Next.js | Desktop UI: transcript editor, waveform, processing panel |
 
 Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

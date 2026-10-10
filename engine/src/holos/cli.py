@@ -270,5 +270,84 @@ def info_cmd(project: Path) -> None:
     _echo("  chain: " + " → ".join(c.module for c in p.chain if c.enabled))
 
 
+@app.command("export")
+def export_cmd(project: Path,
+               out: Annotated[Optional[Path], typer.Option("--out", "-o", help="Output folder (default: export/ next to the project).")] = None,
+               name: Annotated[Optional[str], typer.Option(help="Output file base name.")] = None,
+               video: Annotated[Optional[str], typer.Option(help="Video template id (see `holos templates`).")] = None,
+               param: Annotated[Optional[list[str]], typer.Option("--param", "-p", help="Template parameter key=value (repeatable).")] = None,
+               preview: Annotated[float, typer.Option(help="Only a short video preview of N seconds.")] = 0,
+               wav: Annotated[Optional[bool], typer.Option("--wav/--no-wav")] = None,
+               mp3: Annotated[Optional[bool], typer.Option("--mp3/--no-mp3")] = None,
+               timecodes: Annotated[Optional[bool], typer.Option("--timecodes/--no-timecodes", help="YouTube timecodes file.")] = None,
+               embed_chapters: Annotated[Optional[bool], typer.Option("--embed-chapters/--no-embed-chapters")] = None) -> None:
+    """Deliverables: WAV / MP3, YouTube timecodes, video through a template (chapters embedded)."""
+    from .ops import export_project
+    v = None
+    if video:
+        params = {}
+        for kv in param or []:
+            k, _, val = kv.partition("=")
+            params[k.strip()] = val
+        from . import templates as T
+        m = T.get(video).manifest
+        for pdef in m.params:                        # cast CLI strings to the declared types
+            if pdef.key in params:
+                raw = params[pdef.key]
+                params[pdef.key] = {"int": int, "float": float}.get(pdef.type, str)(raw) if pdef.type != "bool" \
+                    else raw.lower() in ("1", "true", "yes", "так")
+        v = {"template": video, "params": params}
+    t0 = time.time()
+    r = export_project(project, out, name, wav, mp3, timecodes, embed_chapters, v, preview, _cli_progress)
+    _echo(f"Done in {time.time() - t0:.0f}s → {r['out_dir']}")
+    for k, f in r["files"].items():
+        _echo(f"  {k:9s} {f}")
+    for w in r["warnings"]:
+        _echo(f"  ! {w}")
+
+
+@app.command()
+def templates() -> None:
+    """Installed export templates."""
+    from . import templates as T
+    _echo(f"User templates: {T.home() / 'templates'}")
+    for t in T.discover().values():
+        m = t.manifest
+        state = "ready" if not t.missing else f"needs {', '.join(t.missing)} ({m.install})"
+        _echo(f"  {m.id:24s} {m.name} — {state}")
+        for pdef in m.params:
+            _echo(f"      {pdef.key:12s} {pdef.type:6s} {pdef.label}" + (" *" if pdef.required else ""))
+
+
+@app.command()
+def chapters(project: Path,
+             set_: Annotated[Optional[Path], typer.Option("--set", help="Text file with lines 'MM:SS Title' to replace the chapters.")] = None) -> None:
+    """Show chapters as YouTube timecodes, or replace them from a text file."""
+    from . import chapters as C
+    from .mcp_server import parse_time
+    p = Project.load(project)
+    if set_:
+        items = []
+        for line in set_.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            t, _, title = line.partition(" ")
+            items.append({"time": parse_time(t), "title": title})
+        C.set_chapters(p, items, origin="user")
+        p.save(project)
+    rows = C.resolved(p)
+    _echo(C.youtube_text(rows).rstrip() or "(no chapters)")
+    for w in C.check_youtube(rows):
+        _echo(f"! {w}")
+
+
+@app.command("mcp")
+def mcp_cmd() -> None:
+    """MCP server over stdio (for Claude Desktop and other MCP clients)."""
+    from .mcp_server import main
+    main()
+
+
 if __name__ == "__main__":
     app()

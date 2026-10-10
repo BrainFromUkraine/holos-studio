@@ -30,7 +30,10 @@ Design decisions: [DESIGN.md](DESIGN.md) — automatic first, pro audio-tool lay
 - ⬜ Overview: whole-episode lanes (waveform, heat-map spectrogram, edits, loudness)
 - ⬜ Editor detail: zoomed lanes with words, cut handles, fine adjustment
 - ⬜ Playback of the edited timeline, A/B with original
-- ⬜ Export screen: formats, loudness presets, render job, report
+- ✅ Export screen: WAV / MP3, render job with progress, measured loudness, report
+- ✅ Chapters: anchored to words (follow edits), YouTube timecodes file, embedded in MP3 (ID3) and MP4
+- ✅ Export templates (plugins): video through your own script — [TEMPLATES.md](TEMPLATES.md)
+- ⬜ Loudness presets (podcast / YouTube / broadcast), FLAC, cover art and metadata
 - ⬜ Undo / redo
 
 ## Milestone 3 — Desktop app
@@ -40,7 +43,8 @@ Design decisions: [DESIGN.md](DESIGN.md) — automatic first, pro audio-tool lay
 
 ## Milestone 4 — MCP
 
-- ⬜ MCP server over engine operations
+- ✅ MCP server: transcript and chapters (`holos mcp`) — [MCP.md](MCP.md)
+- ⬜ MCP server over the remaining engine operations
 - ⬜ Confirmation flow for destructive actions
 - ⬜ Docs: connecting Claude Desktop / other MCP clients
 

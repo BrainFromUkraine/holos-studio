@@ -5,11 +5,16 @@ after it finishes, so a crash never loses earlier stages.
 """
 from __future__ import annotations
 
+import hashlib
+import json
+import re
+import shutil
+import subprocess
 import time
 from pathlib import Path
 from typing import Callable, Iterable
 
-from .project import Clip, CutEdit, Project, Source, natural_key, sha256_file
+from .project import Clip, CutEdit, Project, Source, dump_json, natural_key, sha256_file
 
 Progress = Callable[[str, int, int, str], None]
 
@@ -164,6 +169,7 @@ def process_project(path: str | Path, progress: Progress = _noop) -> dict:
 
 def summary(p: Project) -> dict:
     """Everything the UI needs for the import / overview screens."""
+    from .chapters import check_youtube, episode_length, resolved
     from .edit import program_time, timeline_map
     tm = timeline_map(p) if len(p.analysis) == len(p.sources) and p.sources else None
     sources = []
@@ -184,15 +190,170 @@ def summary(p: Project) -> dict:
             questions.append({"id": e.id, "kind": e.kind, "source": e.source, "start": e.start, "end": e.end,
                               "text": e.text, "before": e.before, "after": e.after, "reason": e.reason,
                               "episode_time": round(program_time(p, e.source, e.start, tm), 2) if tm else None})
-    length = None
-    if tm:
-        last = p.timeline[-1].source
-        start, a0, b0, rem = tm[last]
-        length = round(start + (b0 - a0) - sum(ce - cs for cs, ce in rem) + p.timeline_settings.tail, 2)
+    length = round(episode_length(p), 2) if tm else None
+    chapter_rows = resolved(p) if tm else []
     return {"name": p.name, "sample_rate": p.sample_rate, "sources": sources,
             "recorded_s": round(sum(s.duration for s in p.sources), 2), "edited_s": length,
             "analyzed": len(p.analysis), "transcribed": len(p.transcript),
             "counts": counts, "questions": sorted(questions, key=lambda q: q["episode_time"] or 0),
+            "chapters": chapter_rows, "chapter_warnings": check_youtube(chapter_rows),
+            "export": p.export.model_dump(),
             "settings": {"language": p.asr.language, "glossary": p.asr.glossary, "model": p.asr.model,
                          "target_lufs": next((c.params.get("target_lufs") for c in p.chain if c.module == "loudness"), None),
                          "auto_apply": p.auto_apply}}
+
+
+# ---- export -------------------------------------------------------------------------------------
+_BAD_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def safe_name(name: str) -> str:
+    return _BAD_NAME.sub("_", name).strip(" .") or "episode"
+
+
+def fingerprint(p: Project) -> str:
+    """Hash of everything that changes the rendered audio (not chapters or export settings)."""
+    data = p.model_dump(mode="json", exclude={"chapters", "export", "transcript_meta", "name"})
+    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def cache_dir(path: str | Path) -> Path:
+    path = Path(path)
+    return path.parent / f"{path.stem}.holos-cache"
+
+
+def master(p: Project, path: str | Path, progress: Progress = _noop) -> tuple[Path, dict]:
+    """Mastered episode WAV, re-rendered only when the edits or the chain changed."""
+    from .render import render
+    d = cache_dir(path) / "render"
+    wav, rep = d / "master.wav", d / "master_report.json"
+    fp = fingerprint(p)
+    if wav.is_file() and rep.is_file():
+        report = json.loads(rep.read_text(encoding="utf-8"))
+        if report.get("fingerprint") == fp:
+            progress("render", 1, 1, "cached")
+            return wav, report
+    q = p.model_copy(deep=True)
+    q.export.wav, q.export.mp3 = True, False
+    progress("render", 0, 1, "timeline")
+    report = render(q, d, "master", progress=lambda s: progress("render", 0, 1, s))
+    report["fingerprint"] = fp
+    dump_json(report, rep)
+    progress("render", 1, 1, "done")
+    return wav, report
+
+
+def _run_ffmpeg(args: list[str]) -> None:
+    from .io import FFmpegError, ffmpeg_path
+    r = subprocess.run([ffmpeg_path(), "-v", "error", "-y", *args], capture_output=True)
+    if r.returncode != 0:
+        raise FFmpegError(r.stderr.decode(errors="replace")[-800:])
+
+
+def export_project(path: str | Path, out_dir: str | Path | None = None, name: str | None = None,
+                   wav: bool | None = None, mp3: bool | None = None, chapters_txt: bool | None = None,
+                   chapters_embed: bool | None = None, video: dict | None = None, preview: float = 0,
+                   progress: Progress = _noop) -> dict:
+    """Render and write the deliverables: WAV, MP3, YouTube timecodes, video via a template.
+
+    `video` = {"template": id, "params": {...}} or None. With `preview` > 0 only a short video is made.
+    Settings given here are saved to the project as the new defaults.
+    """
+    from . import chapters as C
+    from . import templates as T
+    path = Path(path)
+    p = Project.load(path)
+    ex = p.export
+    if wav is not None: ex.wav = wav
+    if mp3 is not None: ex.mp3 = mp3
+    if chapters_txt is not None: ex.chapters_txt = chapters_txt
+    if chapters_embed is not None: ex.chapters_embed = chapters_embed
+    if video is not None:
+        ex.video.template = video.get("template") or None
+        ex.video.params = video.get("params") or {}
+    p.save(path)
+
+    out = Path(out_dir) if out_dir else path.parent / "export"
+    out.mkdir(parents=True, exist_ok=True)
+    base = safe_name(name or p.name)
+    t0 = time.time()
+
+    tpl = None
+    if ex.video.template:
+        tpl = T.get(ex.video.template)
+        T.build_args(tpl.manifest, ex.video.params)          # fail fast on bad parameters
+        if tpl.missing:
+            raise T.TemplateError(f"template '{tpl.manifest.name}' needs Python modules: {', '.join(tpl.missing)}"
+                                  + (f" — install with: {tpl.manifest.install}" if tpl.manifest.install else ""))
+    elif preview:
+        raise ValueError("preview needs a video template")
+
+    master_wav, report = master(p, path, progress)
+    rows = C.resolved(p)
+    warnings = C.check_youtube(rows) if rows else []
+    meta = None
+    if rows and ex.chapters_embed:
+        meta = cache_dir(path) / "render" / "chapters.ffmeta"
+        meta.write_text(C.ffmetadata(rows, p.name), encoding="utf-8")
+
+    files: dict[str, str] = {}
+    if not preview:
+        if ex.wav:
+            progress("wav", 0, 1, base + ".wav")
+            shutil.copyfile(master_wav, out / f"{base}.wav")
+            files["wav"] = str(out / f"{base}.wav")
+        if ex.mp3:
+            progress("mp3", 0, 1, base + ".mp3")
+            target = out / f"{base}.mp3"
+            args = ["-i", str(master_wav)]
+            if meta:
+                args += ["-i", str(meta), "-map", "0:a", "-map_metadata", "1", "-map_chapters", "1"]
+            else:
+                args += ["-metadata", f"title={p.name}"]
+            _run_ffmpeg(args + ["-c:a", "libmp3lame", "-b:a", f"{ex.mp3_kbps}k", "-id3v2_version", "3", str(target)])
+            files["mp3"] = str(target)
+        if ex.chapters_txt and rows:
+            target = out / f"{base}_timecodes.txt"
+            target.write_text(C.youtube_text(rows), encoding="utf-8")
+            files["timecodes"] = str(target)
+
+    if tpl:
+        suffix = "_preview" if preview else ""
+        raw = cache_dir(path) / "render" / f"video_raw.{tpl.manifest.output}"
+        raw.unlink(missing_ok=True)
+        dur = preview or report.get("duration_s", 0)
+
+        def vp(done: float, total: float, detail: str) -> None:
+            if done >= 0:
+                progress("video", int(done), int(total or dur), detail)
+            else:
+                progress("video", -1, int(dur), detail)
+
+        progress("video", 0, int(dur), tpl.manifest.name)
+        T.run(tpl, str(master_wav), str(raw), ex.video.params, preview, vp)
+        target = out / f"{base}{suffix}.{tpl.manifest.output}"
+        if tpl.manifest.remux_audio:
+            progress("mux", 0, 1, target.name)
+            args = ["-i", str(raw), "-i", str(master_wav)]
+            if meta and not preview:
+                args += ["-i", str(meta), "-map_metadata", "2", "-map_chapters", "2"]
+            else:
+                args += ["-metadata", f"title={p.name}"]
+            args += ["-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "320k"]
+            if preview:
+                args += ["-t", f"{preview:g}"]
+            _run_ffmpeg(args + ["-shortest", "-movflags", "+faststart", str(target)])
+            raw.unlink(missing_ok=True)
+        else:
+            shutil.move(str(raw), target)
+        files["preview" if preview else "video"] = str(target)
+        if not preview:
+            T.remember(tpl.manifest.id, ex.video.params, str(path.resolve()))
+
+    result = {"out_dir": str(out), "files": files, "chapters": rows, "warnings": warnings,
+              "duration_s": report.get("duration_s"), "measured": report.get("measured", {}).get("wav"),
+              "seconds": round(time.time() - t0, 1), "preview": bool(preview)}
+    if not preview:
+        dump_json({**result, "render": report}, out / f"{base}_report.json")
+    progress("done", 1, 1, str(out))
+    return result

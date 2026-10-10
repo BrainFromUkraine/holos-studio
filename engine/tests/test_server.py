@@ -76,3 +76,30 @@ def test_decision(tmp_path):
     assert c.post("/api/projects/decision", json={"path": proj, "id": "s1-u1", "decision": "keep"}).status_code == 200
     assert Project.load(proj).edits[0].status == "rejected"
     assert c.post("/api/projects/decision", json={"path": proj, "id": "nope", "decision": "cut"}).status_code == 404
+
+
+def test_create_forgives_folder_paths(tmp_path, monkeypatch):
+    c = _client()
+    files = _files(tmp_path)
+    made_by_dialog = tmp_path / "ep2.holos"
+    made_by_dialog.mkdir()
+    r = c.post("/api/projects", json={"path": str(made_by_dialog), "files": files})
+    assert r.status_code == 200, r.text
+    assert r.json()["path"] == str(made_by_dialog) and made_by_dialog.is_file()
+    folder = tmp_path / "Episode 3"
+    folder.mkdir()
+    r = c.post("/api/projects", json={"path": str(folder), "files": files})
+    assert r.json()["path"] == str(folder / "Episode 3.holos")
+    r = c.post("/api/projects", json={"path": str(tmp_path / "new" / "ep4"), "files": files})
+    assert r.json()["path"].endswith("ep4.holos")
+
+
+def test_unexpected_errors_are_json_with_cors(tmp_path, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("disk on fire")
+    monkeypatch.setattr(ops, "inspect_files", boom)
+    c = TestClient(create_app(TOKEN), headers={"X-Holos-Token": TOKEN, "Origin": "tauri://localhost"},
+                   raise_server_exceptions=False)
+    r = c.post("/api/files/inspect", json={"files": []})
+    assert r.status_code == 500 and "disk on fire" in r.json()["detail"]
+    assert r.headers.get("access-control-allow-origin") == "tauri://localhost"

@@ -43,6 +43,25 @@ def inspect_files(files: Iterable[str | Path], keep_order: bool = False) -> list
     return out
 
 
+def project_file_path(path: str | Path) -> Path:
+    """Where to write a new project, forgiving common mistakes from save dialogs.
+
+    - an empty folder named like a project ("ep2.holos/", made by a dialog) is removed and used as the file name
+    - any other existing folder gets "<folder>.holos" inside it
+    - a missing ".holos" extension is added; the parent folder is created
+    """
+    p = Path(path).expanduser()
+    if p.is_dir():
+        if p.suffix.lower() == ".holos" and not any(p.iterdir()):
+            p.rmdir()
+        else:
+            p = p / f"{p.name or 'episode'}.holos"
+    if p.suffix.lower() != ".holos":
+        p = p.with_name(p.name + ".holos")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def create_project(path: str | Path, files: Iterable[str | Path], name: str | None = None,
                    keep_order: bool = False) -> tuple[Project, list[dict]]:
     """New project from recordings. Returns the project and the skipped duplicates."""

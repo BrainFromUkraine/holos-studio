@@ -18,7 +18,7 @@ from typing import Any, Callable
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from . import __version__
@@ -114,6 +114,16 @@ class DecisionIn(BaseModel):
 
 def create_app(token: str | None = None) -> FastAPI:
     app = FastAPI(title="Holos engine", version=__version__)
+
+    # Registered before CORS so CORS wraps it: an unexpected error still reaches the UI as readable JSON
+    # (a bare 500 from Starlette carries no CORS headers and the browser reports only "Failed to fetch").
+    @app.middleware("http")
+    async def errors_as_json(request: Request, call_next):
+        try:
+            return await call_next(request)
+        except Exception as e:
+            return JSONResponse({"detail": f"{type(e).__name__}: {e}"}, status_code=500)
+
     app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=["*"], allow_headers=["*"])
     jobs: dict[str, Job] = {}
     pool = ThreadPoolExecutor(max_workers=1)
@@ -179,8 +189,9 @@ def create_app(token: str | None = None) -> FastAPI:
     @app.post("/api/projects", dependencies=[Depends(auth)])
     def create(body: CreateIn) -> dict:
         try:
+            body.path = str(ops.project_file_path(body.path))
             p, skipped = ops.create_project(body.path, body.files, body.name, body.keep_order)
-        except ValueError as e:
+        except (ValueError, OSError) as e:
             raise HTTPException(400, str(e))
         if body.language: p.asr.language = body.language
         if body.glossary is not None: p.asr.glossary = body.glossary
@@ -191,7 +202,7 @@ def create_app(token: str | None = None) -> FastAPI:
                     c.params["target_lufs"] = body.target_lufs
         p.save(body.path)
         templates_mod.touch_recent(body.path)
-        return {"summary": ops.summary(p), "skipped": skipped}
+        return {"path": body.path, "summary": ops.summary(p), "skipped": skipped}
 
     @app.get("/api/projects/summary", dependencies=[Depends(auth)])
     def summary(path: str) -> dict:

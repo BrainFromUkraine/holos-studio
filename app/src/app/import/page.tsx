@@ -102,14 +102,16 @@ export default function ImportPage() {
     save("holos.target", target);
     save("holos.language", language);
     try {
-      await engine.create({ path: projectPath, files: unique.map((f) => f.path), language, glossary, target_lufs: target, auto_apply: auto });
-      currentProject.set(projectPath);
-      const j = await engine.process(projectPath);
+      const created = await engine.create({ path: projectPath, files: unique.map((f) => f.path), language, glossary, target_lufs: target, auto_apply: auto });
+      const saved = created.path;          // the engine may fix the path (e.g. a folder picked instead of a file)
+      setProjectPath(saved);
+      currentProject.set(saved);
+      const j = await engine.process(saved);
       setJob(j);
       engine.watch(j.id, async (u) => {
         setJob(u);
         if (u.state === "done") {
-          setSummary(await engine.summary(projectPath));
+          setSummary(await engine.summary(saved));
           setPhase("done");
         } else if (u.state === "error") {
           setErr(u.error);

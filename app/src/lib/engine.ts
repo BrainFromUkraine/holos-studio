@@ -151,13 +151,18 @@ function token(): string {
 }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${ENGINE_URL}${path}`, {
-    method,
-    headers: { "Content-Type": "application/json", "X-Holos-Token": token() },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${ENGINE_URL}${path}`, {
+      method,
+      headers: { "Content-Type": "application/json", "X-Holos-Token": token() },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new Error("Рушій не відповідає. Перевірте вікно PowerShell з `uv run holos serve --dev`.");
+  }
   if (!res.ok) {
-    let msg = `${res.status}`;
+    let msg = `Рушій відповів помилкою ${res.status}`;
     try {
       const j = await res.json();
       msg = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail ?? j);
@@ -170,7 +175,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 export const engine = {
   health: () => call<Health>("GET", "/api/health"),
   inspect: (files: string[]) => call<FileInfo[]>("POST", "/api/files/inspect", { files }),
-  create: (req: CreateRequest) => call<{ summary: Summary; skipped: FileInfo[] }>("POST", "/api/projects", req),
+  create: (req: CreateRequest) => call<{ path: string; summary: Summary; skipped: FileInfo[] }>("POST", "/api/projects", req),
   summary: (path: string) => call<Summary>("GET", `/api/projects/summary?path=${encodeURIComponent(path)}`),
   process: (path: string) => call<Job>("POST", "/api/projects/process", { path }),
   decide: (path: string, id: string, decision: "cut" | "keep") =>

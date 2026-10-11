@@ -4,6 +4,7 @@
 // Click or drag to move the window.
 
 import { useEffect, useMemo, useRef } from "react";
+import { t, useLang } from "@/lib/i18n";
 import type { Piece } from "@/lib/resultmap";
 import type { Timeline } from "@/lib/timeline";
 import type { Assets, View } from "./Timeline";
@@ -11,6 +12,7 @@ import type { Assets, View } from "./Timeline";
 export const OVERVIEW_H = 44;
 
 export function Overview({ tl, pieces, assets, view, width, onView }: { tl: Timeline; pieces: Piece[]; assets: Assets; view: View; width: number; onView: (v: View) => void }) {
+  useLang();
   const cv = useRef<HTMLCanvasElement>(null);
   const total = Math.max(1, tl.length ?? 1);
   const scale = width / total;
@@ -73,13 +75,13 @@ export function Overview({ tl, pieces, assets, view, width, onView }: { tl: Time
 
   const move = (clientX: number) => {
     const r = cv.current!.getBoundingClientRect();
-    const t = (clientX - r.left) / scale;
+    const at = (clientX - r.left) / scale;
     const span = width / view.pps;
-    onView({ ...view, x0: t - span / 2 });
+    onView({ ...view, x0: at - span / 2 });
   };
 
   return (
-    <canvas ref={cv} role="img" aria-label="Увесь епізод" style={{ display: "block", width, height: OVERVIEW_H, cursor: "pointer", touchAction: "none" }}
+    <canvas ref={cv} role="img" aria-label={t("Whole episode")} style={{ display: "block", width, height: OVERVIEW_H, cursor: "pointer", touchAction: "none" }}
       onPointerDown={(e) => { cv.current?.setPointerCapture(e.pointerId); move(e.clientX); }}
       onPointerMove={(e) => { if (e.buttons & 1) move(e.clientX); }} />
   );

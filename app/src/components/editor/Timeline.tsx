@@ -4,6 +4,7 @@
 // audio was removed, chapter markers, heat-map spectrogram and loudness. Drawn on one canvas.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { t, useLang } from "@/lib/i18n";
 import { pieceIndex, type ClipBox, type Piece } from "@/lib/resultmap";
 import type { Timeline as Tl } from "@/lib/timeline";
 
@@ -32,10 +33,16 @@ const C = {
   cut: "#FF4D4D", pause: "#8B8F8B", sel: "#F4F6F4", loud: "#22D3EE", marker: "#3FD17A",
 };
 
-const KIND_SHORT: Record<string, string> = { repeat: "повтор", retake: "дубль", filler: "паразит", fragment: "обрив", sound: "звук", unclear: "нерозбірл.", manual: "мій різ", pause: "пауза" };
+// short lowercase kind names for splice tags (English keys, translated with t())
+const KIND_SHORT: Record<string, string> = { repeat: "repeat", retake: "retake", filler: "filler", fragment: "fragment", sound: "sound", unclear: "unclear", manual: "manual cut", pause: "pause" };
 export function spliceLabel(kinds: string[]): string {
   const k = kinds.filter((x) => x !== "pause");
-  return k.length ? k.map((x) => KIND_SHORT[x] ?? x).join(" + ") : "пауза";
+  return k.length ? k.map((x) => (KIND_SHORT[x] ? t(KIND_SHORT[x]) : x)).join(" + ") : t("pause");
+}
+
+/** Splice tag on the track: "repeat + filler −1.2 s". */
+function spliceTag(kinds: string[], removed: number): string {
+  return `${spliceLabel(kinds)} −${t("{n} s", { n: removed.toFixed(1) })}`;
 }
 
 type Props = {
@@ -79,6 +86,7 @@ export function useLayout(height: number, showSpec: boolean) {
 
 export function TimelineCanvas(props: Props) {
   const { tl, pieces, clips, assets, view, width, tool, sel, splits, playhead, showSpec, onView, onSelect, onSeek, onSplit, onMarkerMove, onMarkerAdd } = props;
+  const lang = useLang();
   const cv = useRef<HTMLCanvasElement>(null);
   const L = useLayout(props.height, showSpec);
   const [drag, setDrag] = useState<Drag>(null);
@@ -304,7 +312,7 @@ export function TimelineCanvas(props: Props) {
       ctx.fillStyle = col;
       ctx.fillRect(Math.round(x) - (on ? 1 : 0), ty + 21, on ? 2 : 1, th - 23);
       if (view.pps * Math.max(sp.removed, 0.3) > 2 || on) {
-        const label = `${spliceLabel(sp.kinds)} −${sp.removed.toFixed(1)} с`;
+        const label = spliceTag(sp.kinds, sp.removed);
         const w = ctx.measureText(label).width + 10;
         const row = i % 2;
         const yTag = ty + 24 + row * 19;
@@ -346,7 +354,7 @@ export function TimelineCanvas(props: Props) {
     // lane separators
     ctx.fillStyle = C.border;
     for (const y of [L.markers.y, L.track.y, L.spec.y, L.loud.y, L.total - 1]) ctx.fillRect(0, y - 1, W, 1);
-  }, [tl, pieces, clips, assets, assets.version, view, width, L, sel, splits, showSpec, markers, sx, xs]);
+  }, [tl, pieces, clips, assets, assets.version, view, width, L, sel, splits, showSpec, markers, sx, xs, lang]);
 
   // ---- hit testing ------------------------------------------------------------------------------
   const laneAt = (y: number) => (y < L.markers.y ? "ruler" : y < L.track.y ? "markers" : y < L.spec.y ? "track" : y < L.loud.y ? "spec" : "loud");
@@ -361,7 +369,7 @@ export function TimelineCanvas(props: Props) {
       if (ctx && view.pps > 4) {
         const yTag = L.track.y + 24 + (i % 2) * 19;
         ctx.font = "10.5px 'IBM Plex Sans', system-ui, sans-serif";
-        const w = ctx.measureText(`${spliceLabel(sp.kinds)} −${sp.removed.toFixed(1)} с`).width + 10;
+        const w = ctx.measureText(spliceTag(sp.kinds, sp.removed)).width + 10;
         if (x >= sxp + 3 && x <= sxp + 3 + w && y >= yTag && y <= yTag + 16) d = 0;
       }
       if (d < bd) { bd = d; best = i; }
@@ -494,7 +502,7 @@ export function TimelineCanvas(props: Props) {
   const ph = sx(playhead);
   return (
     <div style={{ position: "relative", height: L.total }}>
-      <canvas ref={cv} role="img" aria-label="Таймлайн епізоду" style={{ display: "block", width, height: L.total, cursor, touchAction: "none" }}
+      <canvas ref={cv} role="img" aria-label={t("Episode timeline")} style={{ display: "block", width, height: L.total, cursor, touchAction: "none" }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}
         onDoubleClick={(e) => {
           // pointer events carry no click count, so double-click is handled here: new marker on the markers lane

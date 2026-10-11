@@ -1,19 +1,19 @@
-# Architecture (draft)
+# Architecture
 
-This document describes the intended design. It will change as the engine is built — treat it as a plan, not a spec.
+How Holos Studio is put together. Details change as the project grows; the code is the final word.
 
 ## Overview
 
 ```
 ┌──────────────────────────── Tauri v2 desktop shell ───────────────────────────┐
 │  Next.js UI (static export)                                                   │
-│  transcript editor · waveform · processing panel · export                     │
+│  projects · new project · editor (timeline) · automation · export · settings │
 └───────────────▲───────────────────────────────────────────────────────────────┘
                 │ HTTP + WebSocket (localhost, per-launch token)
 ┌───────────────┴──────────────────── engine (Python sidecar) ──────────────────┐
 │  api/      FastAPI: projects, jobs, progress events                           │
 │  asr/      faster-whisper (CUDA) → word-level timestamps                      │
-│  edit/     edit list model, filler/repeat detection, timeline mapping         │
+│  edit/     edit list, repeat/retake detection, automation, timeline mapping   │
 │  dsp/      analysis (VAD, breaths, pauses) + processing modules               │
 │  render/   apply edit list + chain → WAV / MP3, loudness verification         │
 │  mcp/      MCP server exposing the same operations as tools                   │
@@ -25,12 +25,12 @@ The engine is the product. The UI and the MCP server are two clients of the same
 ## Principles
 
 1. **Non-destructive.** Source files are read-only. All edits live in the project file.
-2. **Every automatic decision is reviewable.** Detection (fillers, breaths, pauses) produces *suggestions* with timecodes; applying them is a separate, undoable step.
+2. **Automatic, but every decision is visible.** Detection records every candidate (pauses, breaths, repeats, retakes, fillers); the project's automation settings decide what is cut. Each decision shows up in the editor as a splice that can be restored, and hand edits are never overridden by the automation.
 3. **Measured, not guessed.** Each render is verified (integrated loudness, true peak, dropouts) and the report is stored with the project.
 4. **Modular processing.** Each processing step is a module with a declared parameter schema; the chain is data, not code.
 5. **Local first.** No network needed except optional model download and optional AI providers.
 
-## Project file (`*.holos`, JSON)
+## Project file (`*.holos`, JSON, simplified)
 
 ```jsonc
 {
@@ -83,14 +83,15 @@ Ported from the pipeline already used to master a real episode:
 
 - `faster-whisper` with CUDA (`large-v3` / `large-v3-turbo`), word timestamps, Ukrainian + English.
 - Models downloaded on first run into a user cache directory, never into the repo.
-- Filler / repeat detection runs on the word list (lexicon + timing heuristics), producing suggestions only.
+- Repeat / retake / filler detection runs on the word list (lexicon + timing heuristics). Words are an internal tool — for detection and for anchoring timecodes — not an editing surface.
 
 ## MCP server
 
-Tools mirror engine operations, for example: `open_project`, `get_transcript`, `list_suggestions`, `apply_edits`, `set_chain_param`, `render`, `get_render_report`. Destructive or long operations require explicit confirmation from the client.
+`holos mcp` (stdio) exposes the same operations as the app: projects, transcript, splices, cut / restore / adjust, undo / redo, automation, chapters, templates and export. It shares the undo history with the editor. Tool list: [MCP.md](MCP.md).
 
 ## Packaging
 
-- Engine bundled as a sidecar executable (PyInstaller) inside the Tauri app.
-- FFmpeg shipped as an LGPL build to stay license-compatible with MIT distribution.
-- CUDA runtime: use the user's installed NVIDIA driver; fall back to CPU (int8) when no GPU is present.
+- Windows installer (NSIS) with the engine source, `uv` and FFmpeg; Python dependencies, speech recognition and the NVIDIA CUDA libraries are installed on first run.
+- The app starts the engine in the background with a random per-launch token.
+- Updates come from GitHub Releases through the Tauri updater.
+- CUDA uses the user's installed NVIDIA driver; without an NVIDIA GPU speech recognition falls back to the CPU (int8), much slower.

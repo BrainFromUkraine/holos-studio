@@ -11,46 +11,45 @@ Goal: master a real multi-file podcast episode end to end from the command line.
 - ✅ Import: multiple source files, ordering, duplicate detection (hash)
 - ✅ Analysis: VAD, breaths, pauses, room tone, gate drop-outs
 - ✅ ASR: faster-whisper (CUDA) with word timestamps, cached per source — 18.6 min in 38 s on RTX 2060
-- ✅ Suggestions: retakes across files, repeats / false starts, fillers, unclear speech
+- ✅ Detection: retakes across files, repeats / false starts, fillers, unclear speech
 - ✅ Edit list → timeline rendering with crossfades
 - ✅ Processing chain as modules (ported from the proven pipeline)
 - ✅ Export WAV / MP3 + render report (LUFS, true peak, LRA, drop-outs)
-- ✅ Review export: suggestions as a table (timecode, context, action) + import of decisions
 - ✅ Tests on synthetic audio (no real recordings in the repo)
 
-## Milestone 2 — UI 🟨
+## Milestone 2 — App ✅
 
 Design decisions: [DESIGN.md](DESIGN.md) — automatic first, pro audio-tool layout, studio-green palette, no rounded corners.
 
 - ✅ Local engine API (`holos serve`): FastAPI on 127.0.0.1, token auth, job queue, SSE progress
-- ✅ Engine `process` pipeline: analyze → transcribe (skipped without ASR) → suggest, confident edits auto-applied
-- ✅ App scaffold: Next.js (static export) + Tauri v2 window, studio-green theme, IBM Plex
-- ✅ Import screen: drag & drop / file dialog, duplicates, settings (language, glossary, loudness, auto-apply), live progress
-- ✅ No questions: automation decides (cut / keep per kind), everything visible and reversible in the editor
+- ✅ Full automatic pass: copy → analysis → speech recognition → cuts → editor view
+- ✅ App: Next.js (static export) + Tauri v2 window, studio-green theme, IBM Plex
 - ✅ Start screen with projects; project folders with copied recordings
-- ✅ Automation screen: pauses X→Y, mouth clicks, breaths, repeats / retakes / fillers, loudness, voice chain
-- ✅ Editor v2 like DaVinci Fairlight: finished-episode track, splices, blade / range ripple cuts, chapter markers
-- ✅ Export v2: audio or video, live template preview rendered from the episode, editable timecodes
-- ✅ Editor: whole-episode overview + zoomable lanes (clips, waveform, heat-map spectrogram, words, edits, breaths, loudness)
-- ✅ Every edit visible and reversible; drag or nudge boundaries, snap to silence; own cuts from a waveform range or words
-- ✅ Playback: result (removed parts skipped) / original; listen to an edit with 2 s around it
-- ✅ Export screen: WAV / MP3, render job with progress, measured loudness, report
-- ✅ Chapters: anchored to words (follow edits), YouTube timecodes file, embedded in MP3 (ID3) and MP4
+- ✅ New project: drag & drop, per-file progress, language and glossary
+- ✅ Automation instead of questions: settings decide what is cut, hand edits are never overridden
+- ✅ Automation screen: pauses X → Y, mouth clicks, breaths, repeats / retakes / fillers, loudness, voice chain
+- ✅ Mouth-click removal (detects and repairs short high-frequency clicks without changing timing)
+- ✅ Editor: finished-episode track with closed cuts, labelled splices, blade / range ripple cuts, chapter markers,
+  spectrogram, loudness curve, whole-episode overview
+- ✅ Every splice can be listened to, restored, nudged or snapped to silence; undo / redo kept next to the project
+- ✅ Playback of the finished episode (removed parts skipped)
+- ✅ Export: audio (WAV / MP3 with chapters) or video through a template with a live preview; editable timecodes
 - ✅ Export templates (plugins): video through your own script — [TEMPLATES.md](TEMPLATES.md)
 - ⬜ Loudness presets (podcast / YouTube / broadcast), FLAC, cover art and metadata
-- ✅ Undo / redo (history kept next to the project)
 
-## Milestone 3 — Desktop app
+## Milestone 3 — Windows installer 🟨
 
-- ⬜ Tauri v2 shell, engine as sidecar
-- ⬜ Windows installer, GPU detection, model download manager
+- 🟨 Small installer (~100 MB); speech recognition and GPU libraries download on first run
+- 🟨 Engine started by the app in the background, no terminals
+- 🟨 Automatic updates from GitHub Releases
+- 🟨 Release builds on GitHub Actions
 
-## Milestone 4 — MCP
+## Milestone 4 — MCP ✅
 
-- ✅ MCP server: transcript and chapters (`holos mcp`) — [MCP.md](MCP.md)
-- ⬜ MCP server over the remaining engine operations
-- ⬜ Confirmation flow for destructive actions
-- ⬜ Docs: connecting Claude Desktop / other MCP clients
+- ✅ MCP server with 17 tools: projects, transcript, splices, cut / restore / adjust, undo / redo, automation,
+  chapters, templates, export — [MCP.md](MCP.md)
+- ✅ Shared undo history with the editor; the editor picks up Claude's changes live
+- ✅ Ready configuration and step-by-step setup in the app's Settings
 
 ## Later
 

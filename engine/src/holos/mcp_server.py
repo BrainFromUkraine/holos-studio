@@ -1,4 +1,4 @@
-"""MCP server: Claude (or another MCP client) works in Holos Studio the way it works in KiCad —
+"""MCP server: Claude (or another MCP client) works in Holos Studio —
 open projects, read the episode, cut and restore, adjust automation, set chapters and export.
 
 Run by the MCP client over stdio:  holos mcp   (or: uv --directory <repo>/engine run holos mcp)

@@ -7,6 +7,7 @@ import { EngineSetup } from "@/components/EngineSetup";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { currentProject, engine, setEngineConnection, type Health } from "@/lib/engine";
 import { engineUsable, useEngineInfo } from "@/lib/engineHost";
+import { APP_VERSION, channel, displayVersion } from "@/lib/version";
 
 type EngineState = { health: Health | null; error: string | null; mcpSeen: number | null; packaged: boolean };
 const EngineCtx = createContext<EngineState>({ health: null, error: null, mcpSeen: null, packaged: false });
@@ -82,11 +83,16 @@ export function Shell({ children }: { children: ReactNode }) {
   return (
     <EngineCtx.Provider value={state}>
       <div className="app">
-        <UpdateBanner />
         <header className="titlebar">
           <Link href="/" className="brand" style={{ textDecoration: "none" }} title="Усі проєкти">
             <Logo />
             {inProject ? <span style={{ color: "var(--text2)", fontWeight: 400 }}>Проєкти</span> : "Holos Studio"}
+            {!inProject && channel(APP_VERSION) && (
+              <span className="mono" title={`Версія ${displayVersion(APP_VERSION)} — тестова, можливі помилки`}
+                style={{ fontSize: 10, fontWeight: 600, letterSpacing: ".06em", padding: "1px 5px", border: "1px solid var(--q-border)", background: "var(--q-bg)", color: "var(--question)" }}>
+                {channel(APP_VERSION)!.toUpperCase()}
+              </span>
+            )}
           </Link>
           {inProject && (
             <>
@@ -116,6 +122,7 @@ export function Shell({ children }: { children: ReactNode }) {
             </Link>
           </span>
         </header>
+        <UpdateBanner />
         {children}
       </div>
     </EngineCtx.Provider>
@@ -127,7 +134,7 @@ export function EngineBanner() {
   if (health) return null;
   return (
     <div className="banner error" role="alert">
-      Немає зв&apos;язку з рушієм{error ? ` (${error})` : ""}.{" "}
+      {error && error !== "Рушій не відповідає." ? `Помилка рушія: ${error}. ` : "Немає зв'язку з рушієм. "}
       {packaged ? "Перезапустіть Holos Studio." : <>Запустіть його з терміналу: <code className="mono">cd engine; uv run holos serve --dev</code></>}
     </div>
   );

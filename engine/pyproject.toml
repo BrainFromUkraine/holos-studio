@@ -1,6 +1,6 @@
 [project]
 name = "holos-engine"
-version = "0.2.0"
+version = "0.2.0b1"
 description = "Holos Studio engine: podcast analysis, editing, voice processing and rendering"
 readme = "README.md"
 license = "MIT"

@@ -1,6 +1,7 @@
 # Windows installer (NSIS) + auto-update feed.
 #
-# * Push a tag vX.Y.Z  → build, sign the update, publish a GitHub Release with the installer and latest.json.
+# * Push a tag vX.Y.Z or vX.Y.Z-beta.N → build, sign the update, publish a GitHub Release (a beta is marked
+#   Pre-release) with the text from CHANGELOG.md, and point the update feed (release "updater") at it.
 # * Run manually       → build only; the installer is uploaded as a workflow artifact (no release).
 #
 # Secrets: TAURI_SIGNING_PRIVATE_KEY (+ TAURI_SIGNING_PRIVATE_KEY_PASSWORD) — see docs/RELEASING.md.
@@ -52,6 +53,22 @@ jobs:
             exit 1
           fi
 
+      - name: Release notes from CHANGELOG.md
+        id: notes
+        if: env.IS_TAG == 'true'
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          node scripts/release-notes.mjs "$v" release > "$RUNNER_TEMP/body.md"
+          node scripts/release-notes.mjs "$v" app > "$RUNNER_TEMP/app-notes.md"
+          {
+            echo "title=$(node scripts/release-notes.mjs "$v" title)"
+            echo "prerelease=$([[ "$v" == *-* ]] && echo true || echo false)"
+            echo "body<<HOLOS_EOF"
+            cat "$RUNNER_TEMP/body.md"
+            echo "HOLOS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Fetch uv.exe and ffmpeg.exe (pinned, SHA-256 checked)
         shell: pwsh
         run: ./scripts/fetch-binaries.ps1
@@ -89,16 +106,38 @@ jobs:
         with:
           projectPath: app
           tagName: ${{ github.ref_name }}
-          releaseName: Holos Studio ${{ github.ref_name }}
-          releaseBody: |
-            Windows installer: **Holos.Studio_*_x64-setup.exe** below.
-
-            First launch downloads Python and the speech-recognition libraries (~2.5 GB, once).
-            Installed versions update themselves from this page.
+          releaseName: ${{ steps.notes.outputs.title }}
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
-          prerelease: false
+          prerelease: ${{ steps.notes.outputs.prerelease }}
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+
+      # The app polls releases/download/updater/latest.json (tauri.conf.json → plugins.updater). GitHub's
+      # "latest release" skips pre-releases, so the feed lives in its own release and is replaced on every tag;
+      # its notes are the Ukrainian part of the changelog (what the update banner shows).
+      - name: Publish the update feed
+        if: env.IS_TAG == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -p latest.json --clobber
+          node -e '
+            const fs = require("fs");
+            const j = JSON.parse(fs.readFileSync("latest.json", "utf8"));
+            j.notes = fs.readFileSync("app-notes.md", "utf8").trim();
+            fs.writeFileSync("latest.json", JSON.stringify(j, null, 2));
+            console.log("feed:", j.version, Object.keys(j.platforms).join(", "));
+          '
+          if ! gh release view updater -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create updater -R "$GITHUB_REPOSITORY" --target main --prerelease \
+              --title "Update feed (technical)" \
+              --notes "Used by installed copies of Holos Studio to find new versions. Downloads are on the version releases."
+          fi
+          gh release upload updater latest.json -R "$GITHUB_REPOSITORY" --clobber
 
       # ---- manual run: build only, installer as a workflow artifact -------------------------------------------
       - name: Build installer

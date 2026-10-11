@@ -64,3 +64,4 @@ Thumbs.db
 app/src-tauri/resources/bin/
 app/src-tauri/resources/engine/
 app/src-tauri/gen/
+app/AGENTS.md

@@ -201,7 +201,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    throw new Error("Рушій не відповідає. Перевірте вікно PowerShell з `uv run holos serve --dev`.");
+    throw new Error("Рушій не відповідає.");
   }
   if (!res.ok) {
     let msg = `Рушій відповів помилкою ${res.status}`;

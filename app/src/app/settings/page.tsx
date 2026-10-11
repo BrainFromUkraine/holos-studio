@@ -36,18 +36,19 @@ export default function SettingsPage() {
           <h2 id="mcp-h" style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Claude (MCP)</h2>
           <span className="muted" style={{ fontSize: 12 }}>{seen ? `останній зв'язок ${seen}` : "ще не підключався"}</span>
         </div>
-        <p style={{ margin: 0, lineHeight: 1.6, color: "var(--text2)" }}>
-          Як з KiCad: Claude Desktop бачить ваші проєкти і може різати, відновлювати, міняти автоматику, ставити таймкоди й запускати експорт. Усе, що він робить, можна скасувати Ctrl+Z.
-        </p>
         <ol style={{ margin: 0, paddingLeft: 20, lineHeight: 1.8, color: "var(--text2)" }}>
-          <li>Claude Desktop → Settings → Developer → <b style={{ color: "var(--text)" }}>Edit Config</b>.</li>
-          <li>Додайте <span className="mono">holos-studio</span> у <span className="mono">mcpServers</span> (поруч з іншими серверами, наприклад kicad):</li>
+          <li>Відкрийте Claude Desktop → Settings → Developer → <b style={{ color: "var(--text)" }}>Edit Config</b>. Відкриється файл <span className="mono">claude_desktop_config.json</span>.</li>
+          <li>Скопіюйте конфігурацію нижче і вставте у файл. Якщо у файлі вже є <span className="mono">mcpServers</span>, додайте всередину нього лише блок <span className="mono">holos-studio</span>.</li>
         </ol>
         <pre className="mono" style={{ margin: 0, padding: 12, background: "var(--lane)", border: "1px solid var(--border)", fontSize: 12, whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{config || "…"}</pre>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div>
           <button className="btn" disabled={!config} onClick={async () => { await navigator.clipboard.writeText(config); setCopied(true); setTimeout(() => setCopied(false), 2000); }}>{copied ? "Скопійовано" : "Копіювати"}</button>
-          <span className="muted" style={{ fontSize: 12 }}>3. Перезапустіть Claude Desktop і напишіть: «Зроби таймкоди для мого останнього випуску в Holos».</span>
         </div>
+        <ol start={3} style={{ margin: 0, paddingLeft: 20, lineHeight: 1.8, color: "var(--text2)" }}>
+          <li>Збережіть файл і повністю закрийте Claude Desktop (з трею), потім запустіть знову.</li>
+          <li>Перевірка: напишіть у Claude «Покажи мої проєкти в Holos». Індикатор Claude вгорі цього вікна стане зеленим.</li>
+        </ol>
+        <p className="muted" style={{ margin: 0, fontSize: 12 }}>Зміни, які робить Claude, скасовуються Ctrl+Z у редакторі.</p>
       </section>
 
       <section className="card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }} aria-labelledby="dirs-h">

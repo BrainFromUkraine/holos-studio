@@ -1,9 +1,10 @@
 "use client";
 
 // Slim bar at the top of the window when a new version is on GitHub Releases:
-// "Доступна версія X — Оновити" → download progress → install → restart.
+// "Version X is available — Update" → download progress → install → restart.
 
 import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { t, useLang, type Lang } from "@/lib/i18n";
 import { checkForUpdate, installUpdate, type AvailableUpdate, type UpdateProgress } from "@/lib/updates";
 import { displayVersion } from "@/lib/version";
 
@@ -22,9 +23,39 @@ const C = {
 
 type Phase = { kind: "idle" } | { kind: "available" } | { kind: "downloading"; p: UpdateProgress } | { kind: "installing" } | { kind: "error"; message: string };
 
-const mb = (b: number) => `${(b / 1048576).toFixed(1)} МБ`;
+const mb = (b: number) => t("{n} MB", { n: (b / 1048576).toFixed(1) });
+
+/** A translated sentence with {placeholders} replaced by elements. */
+function rich(text: string, parts: Record<string, ReactNode>): ReactNode[] {
+  return text.split(/(\{\w+\})/).map((x, i) => {
+    const m = /^\{(\w+)\}$/.exec(x);
+    return <Fragment key={i}>{m && m[1] in parts ? parts[m[1]] : x}</Fragment>;
+  });
+}
+
+/**
+ * Release notes carry both languages: "<!-- en -->" and "<!-- uk -->" marker lines, English first. Keep the part for
+ * `lang` (plus anything before the first marker); without markers the whole text is shown.
+ */
+export function notesFor(text: string, lang: Lang): string {
+  const head: string[] = [];
+  const parts: Partial<Record<Lang, string[]>> = {};
+  let cur: Lang | null = null;
+  for (const line of text.split(/\r?\n/)) {
+    const m = /^\s*<!--\s*(en|uk)\s*-->\s*$/.exec(line);
+    if (m) {
+      cur = m[1] as Lang;
+      parts[cur] ??= [];
+    } else if (cur) parts[cur]!.push(line);
+    else head.push(line);
+  }
+  if (!cur) return text;
+  const body = parts[lang]?.some((l) => l.trim()) ? parts[lang]! : (parts.en ?? parts.uk ?? []);
+  return [...head, ...body].join("\n").trim();
+}
 
 export function UpdateBanner({ initial = null }: { initial?: AvailableUpdate | null } = {}) {
+  const lang = useLang();
   const [update, setUpdate] = useState<AvailableUpdate | null>(initial);
   const [phase, setPhase] = useState<Phase>(initial ? { kind: "available" } : { kind: "idle" });
   const [hidden, setHidden] = useState(false);
@@ -88,15 +119,15 @@ export function UpdateBanner({ initial = null }: { initial?: AvailableUpdate | n
       {phase.kind === "available" && (
         <>
           <span>
-            Доступна версія <b className="mono" style={{ fontFamily: C.mono }}>{displayVersion(update.version)}</b>
-            <span style={{ color: C.muted }}> · у вас {displayVersion(update.currentVersion)}</span>
+            {rich(t("Version {version} is available"), { version: <b className="mono" style={{ fontFamily: C.mono }}>{displayVersion(update.version)}</b> })}
+            <span style={{ color: C.muted }}> · {t("you have {version}", { version: displayVersion(update.currentVersion) })}</span>
           </span>
           <button
             type="button"
             onClick={start}
             style={{ height: 24, padding: "0 12px", border: 0, background: C.accent, color: C.bg, fontWeight: 600, fontFamily: C.sans, fontSize: 12, borderRadius: 0, cursor: "pointer" }}
           >
-            Оновити
+            {t("Update")}
           </button>
           {update.notes && (
             <button
@@ -105,37 +136,37 @@ export function UpdateBanner({ initial = null }: { initial?: AvailableUpdate | n
               onClick={() => setNotesOpen((o) => !o)}
               style={{ height: 24, padding: "0 10px", border: `1px solid ${C.border}`, background: notesOpen ? C.raised : "transparent", color: C.text, fontFamily: C.sans, fontSize: 12, borderRadius: 0, cursor: "pointer" }}
             >
-              Що нового {notesOpen ? "▴" : "▾"}
+              {t("What's new")} {notesOpen ? "▴" : "▾"}
             </button>
           )}
         </>
       )}
       {phase.kind === "downloading" && (
         <span style={{ fontFamily: C.mono }}>
-          Завантаження оновлення {displayVersion(update.version)}… {pct !== null ? `${pct}%` : mb(phase.p.downloaded)}
+          {t("Downloading update {version}…", { version: displayVersion(update.version) })} {pct !== null ? `${pct}%` : mb(phase.p.downloaded)}
           {phase.p.total ? <span style={{ color: C.muted }}> · {mb(phase.p.downloaded)} / {mb(phase.p.total)}</span> : null}
         </span>
       )}
-      {phase.kind === "installing" && <span>Встановлення… Holos Studio перезапуститься сама.</span>}
+      {phase.kind === "installing" && <span>{t("Installing… Holos Studio will restart by itself.")}</span>}
       {phase.kind === "error" && (
         <>
           <span style={{ color: C.errorText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }} title={phase.message}>
-            Не вдалося оновити: {phase.message}
+            {t("Update failed: {error}", { error: phase.message })}
           </span>
           <button
             type="button"
             onClick={start}
             style={{ height: 24, padding: "0 12px", border: `1px solid ${C.border}`, background: C.raised, color: C.text, fontFamily: C.sans, fontSize: 12, borderRadius: 0, cursor: "pointer" }}
           >
-            Ще раз
+            {t("Retry")}
           </button>
         </>
       )}
       {!busy && (
         <button
           type="button"
-          aria-label="Пізніше"
-          title="Пізніше"
+          aria-label={t("Later")}
+          title={t("Later")}
           onClick={() => setHidden(true)}
           style={{ marginLeft: "auto", height: 24, width: 24, border: 0, background: "transparent", color: C.muted, fontSize: 16, lineHeight: 1, cursor: "pointer", borderRadius: 0 }}
         >
@@ -150,7 +181,7 @@ export function UpdateBanner({ initial = null }: { initial?: AvailableUpdate | n
       <div
         style={{ flex: "0 0 auto", maxHeight: "45vh", overflowY: "auto", padding: "10px 22px 14px", background: "#0c120e", borderBottom: `1px solid ${C.border}`, color: C.text, fontFamily: C.sans, fontSize: 12.5, lineHeight: 1.6 }}
       >
-        <Notes text={update.notes} />
+        <Notes text={notesFor(update.notes, lang)} />
       </div>
     )}
     </>

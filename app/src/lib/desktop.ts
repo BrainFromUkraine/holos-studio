@@ -1,5 +1,7 @@
 // Desktop (Tauri) integrations with graceful fallbacks when running in a plain browser.
 
+import { t } from "./i18n";
+
 export const AUDIO_EXTENSIONS = ["wav", "WAV", "flac", "FLAC", "mp3", "MP3", "m4a", "M4A", "aif", "aiff"];
 
 export function isDesktop(): boolean {
@@ -9,7 +11,7 @@ export function isDesktop(): boolean {
 export async function pickAudioFiles(): Promise<string[]> {
   if (!isDesktop()) return [];
   const { open } = await import("@tauri-apps/plugin-dialog");
-  const res = await open({ multiple: true, directory: false, filters: [{ name: "Audio", extensions: AUDIO_EXTENSIONS }] });
+  const res = await open({ multiple: true, directory: false, filters: [{ name: t("Audio"), extensions: AUDIO_EXTENSIONS }] });
   if (!res) return [];
   return Array.isArray(res) ? res : [res];
 }
@@ -17,7 +19,7 @@ export async function pickAudioFiles(): Promise<string[]> {
 export async function pickProjectPath(defaultPath?: string): Promise<string | null> {
   if (!isDesktop()) return null;
   const { save } = await import("@tauri-apps/plugin-dialog");
-  return save({ defaultPath, filters: [{ name: "Holos project", extensions: ["holos"] }] });
+  return save({ defaultPath, filters: [{ name: t("Holos project"), extensions: ["holos"] }] });
 }
 
 /** Files dropped on the window (desktop only). Returns an unsubscribe function. */
@@ -50,7 +52,7 @@ export async function pickFile(filters: string[], defaultPath?: string): Promise
   if (!isDesktop()) return null;
   const { open } = await import("@tauri-apps/plugin-dialog");
   const exts = filters.flatMap((e) => [e.toLowerCase(), e.toUpperCase()]);
-  const res = await open({ multiple: false, directory: false, defaultPath, filters: exts.length ? [{ name: "Files", extensions: exts }] : [] });
+  const res = await open({ multiple: false, directory: false, defaultPath, filters: exts.length ? [{ name: t("Supported files"), extensions: exts }] : [] });
   return typeof res === "string" ? res : null;
 }
 

@@ -347,7 +347,7 @@ export default function ExportPage() {
           </tbody>
         </table>
         {blocker && <div className="muted" style={{ fontSize: 12 }}>{blocker}</div>}
-        <button className="btn primary" style={{ height: 54, fontSize: 15 }} disabled={running || !!blocker || !health} onClick={start}>{running ? t("Exporting…") : t("Export")}</button>
+        <button className="btn primary" style={{ height: 54, fontSize: 15 }} disabled={running || !!blocker || !health} onClick={start}>{running ? t("Exporting…") : t("Export episode")}</button>
         {job && running && <Progress job={job} />}
         {result && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

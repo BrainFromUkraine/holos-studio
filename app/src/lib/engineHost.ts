@@ -50,7 +50,7 @@ export async function getEngineInfo(): Promise<EngineInfo> {
   return invoke<EngineInfo>("engine_info");
 }
 
-/** Kill the engine (or a running setup) and bring it up again — the "Спробувати ще раз" button. */
+/** Kill the engine (or a running setup) and bring it up again — the "Try again" button. */
 export async function restartEngine(): Promise<EngineInfo> {
   if (!inTauri()) return DEV_ENGINE;
   const { invoke } = await import("@tauri-apps/api/core");

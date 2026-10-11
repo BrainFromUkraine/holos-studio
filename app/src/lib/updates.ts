@@ -2,6 +2,7 @@
 // src-tauri/tauri.conf.json → plugins.updater; releases are signed by CI (docs/RELEASING.md).
 
 import { inTauri } from "./engineHost";
+import { t } from "./i18n";
 
 export type AvailableUpdate = {
   version: string;
@@ -39,7 +40,7 @@ export async function checkForUpdate(): Promise<AvailableUpdate | null> {
  * version itself, so this promise usually never resolves there.
  */
 export async function installUpdate(onProgress?: (p: UpdateProgress) => void): Promise<void> {
-  if (!pending) throw new Error("Немає оновлення для встановлення");
+  if (!pending) throw new Error(t("No update to install"));
   let downloaded = 0;
   let total: number | null = null;
   await pending.downloadAndInstall((ev) => {

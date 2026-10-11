@@ -5,6 +5,8 @@
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { onSetupLine, restartEngine, type EngineInfo } from "@/lib/engineHost";
+import { t, useLang } from "@/lib/i18n";
+import { UK } from "@/lib/i18n/uk";
 
 const C = {
   bg: "#0A0B0A",
@@ -31,7 +33,7 @@ export type SetupProgress = {
   /** 0–100, or null while nothing measurable has happened yet (indeterminate bar). */
   pct: number | null;
   stage: string;
-  /** "634 / 2410 МБ" while downloading. */
+  /** "634 / 2410 MB" while downloading. */
   detail: string | null;
 };
 
@@ -74,15 +76,15 @@ export function estimateProgress(lines: string[]): SetupProgress {
       installed = true;
     } else if (/^Bytecode compiled/.test(line)) {
       compiled = true;
-    } else if (line === "Готово.") {
+    } else if (line === "Done.") {
       finished = true;
     }
   }
 
-  if (finished) return { pct: 100, stage: "Готово", detail: null };
-  if (compiled) return { pct: 99, stage: "Завершення", detail: null };
-  if (installed) return { pct: 95, stage: "Компіляція Python-коду", detail: null };
-  if (prepared) return { pct: 88, stage: "Встановлення бібліотек", detail: null };
+  if (finished) return { pct: 100, stage: t("Done"), detail: null };
+  if (compiled) return { pct: 99, stage: t("Finishing"), detail: null };
+  if (installed) return { pct: 95, stage: t("Compiling Python code"), detail: null };
+  if (prepared) return { pct: 88, stage: t("Installing libraries"), detail: null };
 
   let total = 0;
   let got = 0;
@@ -100,11 +102,27 @@ export function estimateProgress(lines: string[]): SetupProgress {
     const frac = 0.8 * (got / total) + 0.2 * (count / sizes.size);
     return {
       pct: 4 + Math.round(frac * 82),
-      stage: pythonPending ? "Завантаження Python 3.12" : "Завантаження бібліотек",
-      detail: `${Math.round(got)} / ${Math.round(total)} МБ`,
+      stage: pythonPending ? t("Downloading Python 3.12") : t("Downloading libraries"),
+      detail: t("{got} / {total} MB", { got: Math.round(got), total: Math.round(total) }),
     };
   }
-  return { pct: python ? 3 : null, stage: lines.length ? "Підготовка" : "Початок", detail: null };
+  return { pct: python ? 3 : null, stage: lines.length ? t("Preparing") : t("Starting setup"), detail: null };
+}
+
+/**
+ * Messages from the desktop shell (src-tauri/src/engine.rs) are English; translate the fixed part. Dynamic details
+ * come after ": " or " (" and stay as they are. Unknown messages are shown untranslated.
+ */
+function shellMessage(msg: string): string {
+  const known = (k: string) => Object.prototype.hasOwnProperty.call(UK, k);
+  if (known(msg)) return t(msg);
+  const cuts = [msg.indexOf(": "), msg.indexOf(" (")].filter((i) => i > 0);
+  if (cuts.length) {
+    const i = Math.min(...cuts);
+    const head = msg.slice(0, i);
+    if (known(head)) return t(head) + msg.slice(i);
+  }
+  return msg;
 }
 
 // ---- component ---------------------------------------------------------------------------------------------------
@@ -134,6 +152,7 @@ const btn = (primary: boolean): CSSProperties => ({
 });
 
 export function EngineSetup({ info }: { info: EngineInfo }) {
+  const lang = useLang();
   const [lines, setLines] = useState<string[]>(info.log_tail);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -163,7 +182,7 @@ export function EngineSetup({ info }: { info: EngineInfo }) {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight });
   }, [lines]);
 
-  const progress = useMemo(() => estimateProgress(lines), [lines]);
+  const progress = useMemo(() => estimateProgress(lines), [lines, lang]);
   // Never move backwards (a restart resets it).
   if (info.state === "setup" && progress.pct !== null) best.current = Math.max(best.current, progress.pct);
   if (info.state !== "setup" && info.state !== "starting") best.current = 0;
@@ -172,12 +191,12 @@ export function EngineSetup({ info }: { info: EngineInfo }) {
   const isSetup = info.state === "setup";
   const pct = isSetup && progress.pct !== null ? best.current : null;
 
-  const title = isError ? "Не вдалося запустити engine" : isSetup ? "Перший запуск: готуємо engine" : "Запускаємо engine…";
+  const title = isError ? t("Could not start the engine") : isSetup ? t("First run: preparing the engine") : t("Starting the engine…");
   const lead = isError
-    ? info.error ?? "Невідома помилка."
+    ? info.error ? shellMessage(info.error) : t("Unknown error.")
     : isSetup
-      ? "Holos Studio завантажує Python і бібліотеки для розпізнавання мови на відеокарті (близько 2,5 ГБ). Це відбувається один раз — далі програма стартує за кілька секунд."
-      : "Кілька секунд…";
+      ? t("Holos Studio is downloading Python and the libraries for speech recognition on the GPU (about 2.5 GB). This happens only once — after that the app starts in a few seconds.")
+      : t("A few seconds…");
 
   const retry = async () => {
     setBusy(true);
@@ -255,7 +274,7 @@ export function EngineSetup({ info }: { info: EngineInfo }) {
           {!isError && (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <div style={{ display: "flex", fontFamily: C.mono, fontSize: 12, color: C.text2 }}>
-                <span>{isSetup ? progress.stage : "Запуск"}</span>
+                <span>{isSetup ? progress.stage : t("Starting")}</span>
                 {isSetup && progress.detail && <span style={{ marginLeft: 12, color: C.muted }}>{progress.detail}</span>}
                 <span style={{ marginLeft: "auto", color: C.text }}>{pct !== null ? `${pct}%` : ""}</span>
               </div>
@@ -264,7 +283,7 @@ export function EngineSetup({ info }: { info: EngineInfo }) {
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={pct ?? undefined}
-                aria-label={isSetup ? progress.stage : "Запуск engine"}
+                aria-label={isSetup ? progress.stage : t("Starting the engine")}
                 style={{ height: 6, background: C.raised, position: "relative", overflow: "hidden" }}
               >
                 {pct !== null ? (
@@ -290,17 +309,17 @@ export function EngineSetup({ info }: { info: EngineInfo }) {
           {isError && (
             <div style={{ display: "flex", gap: 8 }}>
               <button type="button" style={btn(true)} onClick={retry} disabled={busy}>
-                {busy ? "Запускаємо…" : "Спробувати ще раз"}
+                {busy ? t("Starting…") : t("Try again")}
               </button>
               <button type="button" style={btn(false)} onClick={copyLog}>
-                {copied ? "Скопійовано" : "Скопіювати журнал"}
+                {copied ? t("Copied") : t("Copy log")}
               </button>
             </div>
           )}
 
           {(lines.length > 0 || isError) && (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: 0.8 }}>Журнал</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: 0.8 }}>{t("Log")}</span>
               <pre
                 ref={logRef}
                 aria-live="polite"
@@ -326,7 +345,7 @@ export function EngineSetup({ info }: { info: EngineInfo }) {
 
           {isSetup && (
             <p style={{ margin: 0, fontSize: 12, color: C.muted }}>
-              Не закривайте вікно. Якщо закриєте — підготовка продовжиться з того ж місця під час наступного запуску.
+              {t("Keep this window open. If you close it, setup picks up where it left off the next time you start the app.")}
             </p>
           )}
         </div>

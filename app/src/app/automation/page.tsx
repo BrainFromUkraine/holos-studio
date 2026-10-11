@@ -11,7 +11,7 @@ import { t, useLang } from "@/lib/i18n";
 const kinds = (): [string, string][] => [
   ["repeat", t("Repeats within a file")],
   ["retake", t("Retakes across files")],
-  ["filler", t("Um, uh")],
+  ["filler", t("Fillers (um, uh)")],
   ["fragment", t("Fragments")],
   ["unclear", t("Unclear speech")],
 ];

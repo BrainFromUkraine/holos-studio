@@ -1,4 +1,5 @@
 import type { Timeline } from "./timeline";
+import { t } from "./i18n";
 
 // Client for the local Holos engine API (`holos serve`).
 
@@ -192,6 +193,14 @@ function token(): string {
   }
 }
 
+/** Thrown when the engine cannot be reached at all (not running / wrong port). Check with `instanceof`, not the text. */
+export class EngineDownError extends Error {
+  constructor() {
+    super(t("The engine is not responding."));
+    this.name = "EngineDownError";
+  }
+}
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
@@ -201,10 +210,10 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    throw new Error("Рушій не відповідає.");
+    throw new EngineDownError();
   }
   if (!res.ok) {
-    let msg = `Рушій відповів помилкою ${res.status}`;
+    let msg = t("The engine returned error {status}", { status: res.status });
     try {
       const j = await res.json();
       msg = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail ?? j);

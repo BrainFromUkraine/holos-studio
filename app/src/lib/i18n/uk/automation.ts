@@ -8,7 +8,7 @@ export const automation: Record<string, string | string[]> = {
   "Back to the new project": "До нового проєкту",
   "What the app does by itself as soon as you import recordings.": "Що програма робить сама, щойно ви імпортували записи.",
   "Changes here recalculate the episode straight away — you can still adjust each case in the editor, and your manual edits are never overwritten.":
-    "Зміна тут одразу перераховує епізод — у редакторі можна підправити кожен окремий випадок; ваші ручні правки не перезаписуються.",
+    "Зміна тут одразу перераховує випуск — у редакторі можна підправити кожен окремий випадок; ваші ручні правки не перезаписуються.",
   "Loading…": "Завантажую…",
 
   // pauses
@@ -21,7 +21,7 @@ export const automation: Record<string, string | string[]> = {
   "Length after shortening, s": "Довжина після скорочення, с",
   "Cuts in the middle of the silence with a crossfade, so the rhythm of speech stays natural.":
     "Ріже посередині тиші, з кросфейдом — ритм мови лишається природним.",
-  "Crossfade at splices": "Кросфейд на стиках",
+  "Crossfade at splices": "Кросфейд на склейках",
   "{n} ms": "{n} мс",
 
   // mouth clicks
@@ -46,13 +46,13 @@ export const automation: Record<string, string | string[]> = {
   "Repeats, retakes, fragments": "Повтори, дублі, обірвані фрази",
   "Repeats within a file": "Повтори в одному файлі",
   "Retakes across files": "Дублі між файлами",
-  "Um, uh": "Еее, ммм",
+  "Fillers (um, uh)": "Слова-паразити (еее, ммм)",
   "Fragments": "Обірвані слова",
   "Unclear speech": "Нерозбірлива мова",
   "Cut": "Вирізати",
   "Keep": "Залишити",
   "Each cut shows up in the editor as a splice — you can listen to it and restore it.":
-    "Кожен різ видно в редакторі як стик — його можна прослухати й відновити.",
+    "Кожен виріз видно в редакторі як склейку — її можна прослухати й відновити.",
 
   // loudness
   "Loudness": "Гучність",

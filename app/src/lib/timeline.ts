@@ -1,6 +1,8 @@
 // Editor timeline model: the same time mapping the engine renderer uses (engine/src/holos/edit),
 // so the playhead, episode timecodes and "result" playback match the exported file.
 
+import { t } from "@/lib/i18n";
+
 export type TlSource = {
   id: string;
   name: string;
@@ -62,18 +64,23 @@ export type Timeline = {
   history: { can_undo: boolean; can_redo: boolean; undo_label: string | null; redo_label: string | null };
 };
 
+/** Edit kind → label (English key; show it with kindLabel() or t()). */
 export const KIND_LABEL: Record<string, string> = {
-  retake: "Дубль",
-  repeat: "Повтор",
-  filler: "Паразит",
-  fragment: "Обірване слово",
-  sound: "Звук без слів",
-  unclear: "Нерозбірливо",
-  manual: "Мій різ",
-  pause: "Пауза",
-  breath: "Вдих",
-  fill: "Провал фону",
+  retake: "Retake",
+  repeat: "Repeat",
+  filler: "Filler",
+  fragment: "Fragment",
+  sound: "Sound without words",
+  unclear: "Unclear",
+  manual: "Manual cut",
+  pause: "Pause",
+  breath: "Breath",
+  fill: "Drop-out",
 };
+
+export function kindLabel(kind: string): string {
+  return KIND_LABEL[kind] ? t(KIND_LABEL[kind]) : kind;
+}
 
 /** Source time → time inside the assembled clip (port of edit.map_time). */
 export function mapTime(t: number, a0: number, removals: [number, number][], xf: number): number {
@@ -180,18 +187,26 @@ export function joinWords(ws: string[]): string {
   return line.join(" ");
 }
 
-/** The engine writes its reasons in English (it is shared with other tools); the app shows them in Ukrainian. */
-export function reasonUk(r: string): string {
+/** The engine writes its reasons in English (it is shared with other tools); the app shows them as sentences in the UI language. */
+export function reasonText(r: string): string {
   if (!r || r === "manual") return "";
   let m: RegExpMatchArray | null;
-  if ((m = r.match(/^redone at the start of the next file \((\d+) matching words\)/))) return `Перезаписано на початку наступного файлу (збігається слів: ${m[1]}).`;
-  if ((m = r.match(/^restarted: (\d+) words repeat/))) return `Фразу почато заново — повторюється слів: ${m[1]}.`;
-  if (r === "filler word") return "Слово-паразит.";
-  if (r === "broken-off word") return "Обірване на півслові.";
-  if (r.startsWith("low recognition confidence")) return "Розпізнавання не впевнене — послухайте й вирішіть.";
-  if (r.startsWith("voiced sound with no transcribed word")) return "Звук голосу без слів — можливо «еее».";
-  if ((m = r.match(/^breath \(peak (-?[\d.]+) dBFS\)/))) return `Вдих (пік ${m[1]} dBFS).`;
-  if ((m = r.match(/^pause ([\d.]+)s/))) return `Пауза ${m[1]} с.`;
-  if (r === "gate drop-out") return "Провал фону після гейта рекордера — заповнюється тоном кімнати.";
+  if ((m = r.match(/^redone at the start of the next file \((\d+) matching words\)/))) return t("Redone at the start of the next file ({n} matching words).", { n: m[1] });
+  if ((m = r.match(/^restarted: (\d+) words repeat/))) return t("Phrase restarted — {n} words repeat.", { n: m[1] });
+  if (r === "filler word") return t("Filler word.");
+  if (r === "broken-off word") return t("Broken off mid-word.");
+  if (r.startsWith("low recognition confidence")) return t("Low recognition confidence — listen and decide.");
+  if (r.startsWith("voiced sound with no transcribed word")) return t("Voiced sound without words — possibly “um”.");
+  if ((m = r.match(/^breath \(peak (-?[\d.]+) dBFS\)/))) return t("Breath (peak {db} dBFS).", { db: m[1] });
+  if ((m = r.match(/^pause ([\d.]+)s/))) return t("Pause {n} s.", { n: m[1] });
+  if (r === "gate drop-out") return t("Background drop-out after the recorder's gate — filled with room tone.");
   return r;
 }
+
+/** Text of an edit for display; "sound" edits have no words (old engines wrote "(звук без слів)"). */
+export function editText(e: Pick<TlEdit, "kind" | "text">): string {
+  return e.kind === "sound" ? t("(sound without words)") : e.text ?? "";
+}
+
+/** @deprecated use reasonText */
+export const reasonUk = reasonText;

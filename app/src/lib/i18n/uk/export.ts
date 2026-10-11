@@ -1,0 +1,88 @@
+// Ukrainian for the export area (keys = English UI text).
+export const exportArea: Record<string, string | string[]> = {
+  // progress stages
+  "Mixing and processing audio": "Зведення й обробка звуку",
+  "MP3 with chapters": "MP3 з розділами",
+  "Video": "Відео",
+  "Adding audio and chapters to the video": "Звук і розділи у відео",
+  "Done": "Готово",
+  "Queued": "Черга",
+
+  // no project
+  "No project open.": "Проєкт не відкрито.",
+  "Choose or create a project": "Виберіть або створіть проєкт",
+
+  // what to export
+  "What to export": "Що експортувати",
+  "Output": "Що зробити",
+  "Audio only": "Тільки аудіо",
+  "WAV + MP3 + timecodes": "WAV + MP3 + таймкоди",
+  "Audio + video": "Аудіо + відео",
+  "+ MP4 for YouTube": "+ MP4 для YouTube",
+  "Video style": "Вигляд відео",
+  "preview…": "прев'ю…",
+  "missing modules": "бракує модулів",
+  "Missing Python modules:": "Бракує модулів Python:",
+  "File path": "Шлях до файлу",
+  "Choose: {label}": "Вибрати: {label}",
+  "Formats": "Формати",
+  "24-bit · 48 kHz — master": "24-bit · 48 kHz — майстер",
+  "192 kbps, chapters embedded": "192 kbps, розділи всередині",
+
+  // live preview
+  "Preview and timecodes": "Прев'ю і таймкоди",
+  "Live preview": "Живе прев'ю",
+  "the first 6 s of your episode through the template · change the settings and it redraws by itself":
+    "перші 6 с вашого епізоду через шаблон · змінюйте налаштування — перемальовується саме",
+  "Video preview": "Прев'ю відео",
+  "Rendering preview…": "Рендерю прев'ю…",
+  "{n} s": "{n} с",
+  "the first run also mixes the episode audio": "перший раз ще зводиться звук епізоду",
+  "Choose a video style on the left": "Виберіть вигляд відео ліворуч",
+  "This template is missing Python modules: {modules}": "Шаблону бракує модулів Python: {modules}",
+  "Fill in {fields} and the preview will appear here": "Заповніть: {fields} — і тут з'явиться прев'ю",
+
+  // timecodes
+  "Timecodes": "Таймкоди",
+  "set by Claude · editable": "поставив Claude · можна правити",
+  "editable": "можна правити",
+  "Copy a request to paste into Claude Desktop": "Скопіювати запит і вставити в Claude Desktop",
+  "Copied — paste it into Claude": "Скопійовано — вставте в Claude",
+  "Ask Claude": "Попросити Claude",
+  "Make timecodes (chapters) for the episode “{name}” in Holos Studio.": "Зроби таймкоди (розділи) для випуску «{name}» у Holos Studio.",
+  "Timecode": "Таймкод",
+  "No timecodes yet. Ask Claude: “Make timecodes for {name}” — it will read the episode and add chapters, and they’ll appear here by themselves. Or add them by hand, or with markers in the editor (M).":
+    "Таймкодів ще немає. Попросіть Claude: «Зроби таймкоди для {name}» — він прочитає епізод і поставить розділи, вони з'являться тут самі. Або додайте вручну, чи маркерами в редакторі (M).",
+  "episode": "епізод",
+  "Time {n}": "Час {n}",
+  "Title {n}": "Назва {n}",
+  "Chapter title": "Назва розділу",
+  "Delete {n}": "Видалити {n}",
+  "Save timecodes": "Зберегти таймкоди",
+  "Cancel": "Скасувати",
+  "Use the MM:SS time format": "Час у форматі ХХ:СС",
+  "The same timecodes go into a file for the YouTube description and inside the MP3 / MP4 — players show the chapters by themselves.":
+    "Ці ж таймкоди підуть у файл для опису YouTube і всередину MP3 / MP4 — плеєри покажуть розділи самі.",
+  "YouTube shows chapters only when there are at least {n}.": "YouTube показує розділи, лише коли їх щонайменше {n}.",
+  "Chapter “{title}” is shorter than {n} s — YouTube won’t show it.": "Розділ «{title}» коротший за {n} с — YouTube його не покаже.",
+
+  // destination and checks
+  "Destination and checks": "Куди і перевірка",
+  "Goes to the project folder": "Буде у папці проєкту",
+  "Duration": "Тривалість",
+  "Loudness": "Гучність",
+  "{v} LUFS (target)": "{v} LUFS (ціль)",
+  "True peak": "True peak",
+  "−2.0 dBTP (ceiling)": "−2.0 dBTP (стеля)",
+  "Timecode count": "Таймкодів",
+  "Template is missing modules": "Шаблону бракує модулів",
+  "Fill in: {fields}": "Заповніть: {fields}",
+  "Save the timecodes first": "Збережіть таймкоди",
+  "Nothing selected": "Нічого не вибрано",
+  "Exporting…": "Експортую…",
+  "Export": "Експортувати",
+  "Done in {time}": "Готово за {time}",
+  "Show": "Показати",
+  "After rendering, loudness and peaks are measured again and a report is saved alongside.":
+    "Після рендеру гучність і піки вимірюються ще раз, звіт кладеться поруч.",
+};

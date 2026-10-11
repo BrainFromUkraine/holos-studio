@@ -68,3 +68,13 @@ export async function revealFile(path: string): Promise<boolean> {
   await revealItemInDir(path);
   return true;
 }
+
+/** Open a web page in the default browser (a plain new tab outside the desktop app). */
+export async function openExternal(url: string): Promise<void> {
+  if (!isDesktop()) {
+    window.open(url, "_blank", "noopener");
+    return;
+  }
+  const { openUrl } = await import("@tauri-apps/plugin-opener");
+  await openUrl(url);
+}

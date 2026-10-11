@@ -16,35 +16,76 @@ launch. Updates come from GitHub Releases through the Tauri updater.
 The installer is per-user (no admin rights): `%LOCALAPPDATA%\Holos Studio`. It is shown in Ukrainian or English,
 following the Windows display language.
 
+## Versions
+
+[Semantic Versioning](https://semver.org) with pre-releases:
+
+| Version | Meaning | GitHub |
+|---|---|---|
+| `0.3.0-beta.1`, `0.3.0-beta.2`, … | test builds of 0.3.0; every fix is the next beta | **Pre-release** |
+| `0.3.0` | stable, after the betas | normal release |
+| `0.3.1` | a fix for a stable version | normal release |
+
+The app shows `0.3.0 Beta 2` and a **BETA** mark in the title bar. The Python package gets the PEP 440 form
+(`0.3.0b2`); `scripts/bump-version.mjs` converts it. Allowed suffixes: `-alpha.N`, `-beta.N`, `-rc.N`.
+
+## Release notes
+
+Every version needs a section in [CHANGELOG.md](../CHANGELOG.md) before it is tagged — the workflow fails without
+one. Format:
+
+```markdown
+## [0.3.0-beta.2] — 2026-10-20
+
+One line about the release.
+
+### English
+
+#### New / Improved / Fixed / Removed / Known limitations
+- …
+
+### Українською
+
+#### Нове / Покращено / Виправлено / Видалено / Відомі обмеження
+- …
+```
+
+`scripts/release-notes.mjs <version> release|app|title` turns it into the GitHub release text (both languages), the
+update-banner text (Ukrainian part, shown under **Що нового**) and the title (`Holos Studio 0.3.0 Beta 2`).
+
 ## Cutting a release
 
 1. Make sure `main` is green (CI: engine tests, app typecheck + build).
-2. Bump the version everywhere:
+2. Write the `CHANGELOG.md` section for the new version.
+3. Bump the version everywhere:
 
    ```bash
-   node scripts/bump-version.mjs 0.3.0
+   node scripts/bump-version.mjs 0.3.0-beta.2
    ```
 
    This updates `app/package.json` (+ lock), `app/src-tauri/tauri.conf.json`, `app/src-tauri/Cargo.toml`
    (+ `Cargo.lock`), `engine/pyproject.toml` (+ `uv.lock`) and `engine/src/holos/__init__.py`.
-3. Commit, tag, push the tag:
+4. Commit, tag, push the tag:
 
    ```bash
-   git commit -am "release: v0.3.0"
-   git tag v0.3.0
-   git push origin main v0.3.0
+   git commit -am "release: v0.3.0-beta.2"
+   git tag v0.3.0-beta.2
+   git push origin main v0.3.0-beta.2
    ```
 
-4. The **Release** workflow (`.github/workflows/release.yml`) runs on the tag (~20 min on `windows-latest`):
+5. The **Release** workflow (`.github/workflows/release.yml`) runs on the tag (~20 min on `windows-latest`):
    downloads uv / FFmpeg (SHA-256 checked), stages the engine source (`scripts/stage-engine.mjs`), builds the app,
-   signs the update and publishes a GitHub Release with:
-   - `Holos.Studio_0.3.0_x64-setup.exe` — the installer (also the update payload),
-   - `Holos.Studio_0.3.0_x64-setup.exe.sig` — its updater signature,
-   - `latest.json` — the update manifest the app polls.
+   signs the update and publishes a GitHub Release (a pre-release for `-beta.N`) with the changelog text and:
+   - `Holos.Studio_<version>_x64-setup.exe` — the installer (also the update payload),
+   - `Holos.Studio_<version>_x64-setup.exe.sig` — its updater signature,
+   - `latest.json` — the update manifest.
 
-   The workflow refuses to run if the tag and `tauri.conf.json` disagree, or if the signing key secret is missing.
+   It then copies `latest.json` (with the Ukrainian notes) to the release tagged **`updater`** — the update feed
+   installed apps poll (`plugins.updater.endpoints` in `tauri.conf.json`). GitHub's "latest release" ignores
+   pre-releases, so the feed has its own fixed address. Do not delete that release.
 
-The release text can be edited on GitHub afterwards; the first line of the body is shown in the app's update banner.
+   The workflow refuses to run if the tag and `tauri.conf.json` disagree, if `CHANGELOG.md` has no section for the
+   version, or if the signing key secret is missing.
 
 ### Test build without a release
 

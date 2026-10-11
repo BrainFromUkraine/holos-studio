@@ -3,8 +3,11 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { EngineBanner, useEngine } from "@/components/Shell";
-import { isDesktop, pickFolder, revealFile } from "@/lib/desktop";
+import { isDesktop, openExternal, pickFolder, revealFile } from "@/lib/desktop";
 import { engine, type Settings } from "@/lib/engine";
+import { APP_VERSION, channel, displayVersion } from "@/lib/version";
+
+const CHANGELOG_URL = "https://github.com/BrainFromUkraine/holos-studio/blob/main/CHANGELOG.md";
 
 type Full = Settings & { mcp_config?: unknown; version?: string };
 
@@ -68,7 +71,8 @@ export default function SettingsPage() {
       <section className="card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 6 }} aria-labelledby="about-h">
         <h2 id="about-h" style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Про програму</h2>
         <div className="muted" style={{ fontSize: 12.5, lineHeight: 1.7 }}>
-          Holos Studio {s?.version ?? health?.version ?? ""} · відкритий код, MIT · github.com/BrainFromUkraine/holos-studio<br />
+          Holos Studio {displayVersion(APP_VERSION)}{channel(APP_VERSION) ? " · тестова версія" : ""} · відкритий код, MIT ·{" "}
+          <a href={CHANGELOG_URL} onClick={(e) => { e.preventDefault(); openExternal(CHANGELOG_URL); }} style={{ color: "var(--core)" }}>що нового</a><br />
           Рушій: {health ? `${health.version} · ${health.cuda_devices ? "GPU CUDA" : "CPU"} · ffmpeg ${health.ffmpeg ? "✓" : "—"}` : "не запущено"}
         </div>
       </section>

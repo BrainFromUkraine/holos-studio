@@ -2,7 +2,7 @@
 
 **A podcast editor that does the rough work for you.** Record your podcast, drop in the files and get an almost finished episode. You only review the result and polish the details.
 
-> 🚧 **Status: early version.** Runs on Windows from source; an installer with automatic updates is on the way. See the [roadmap](docs/ROADMAP.md).
+> 🚧 **Status: early version.** Runs on Windows from source; an installer with automatic updates is on the way. See the [roadmap](docs/ROADMAP.md) and [what's new](CHANGELOG.md).
 
 *Holos* (Голос) means "voice" in Ukrainian.
 
@@ -73,7 +73,7 @@ The project is at an early stage. Issues and ideas are welcome.
 
 **Holos Studio — редактор подкастів, який робить чорнову роботу за тебе.** Записав подкаст, кинув файли — і отримав майже готовий випуск. Ти лише переглядаєш результат і доводиш дрібниці.
 
-> 🚧 **Статус: рання версія.** Працює на Windows із вихідного коду; інсталятор з автооновленням — на підході.
+> 🚧 **Статус: рання версія.** Працює на Windows із вихідного коду; інсталятор з автооновленням — на підході. Що нового — у [CHANGELOG.md](CHANGELOG.md).
 
 ### Як це працює
 

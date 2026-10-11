@@ -410,6 +410,8 @@ impl EngineManager {
     }
 
     fn line(&self, app: &AppHandle, generation: u64, line: String, setup: bool) {
+        // `holos serve` prints its token; keep it out of the log the user may copy into a bug report.
+        let line = if line.starts_with("HOLOS_TOKEN=") { "HOLOS_TOKEN=…".to_string() } else { line };
         {
             let mut g = self.lock();
             if g.generation != generation {

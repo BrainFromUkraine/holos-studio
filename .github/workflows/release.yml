@@ -1,6 +1,6 @@
 # Windows installer (NSIS) + auto-update feed.
 #
-# * Push a tag vX.Y.Z or vX.Y.Z-beta.N → build, sign the update, publish a GitHub Release (a beta is marked
+# * Push a tag vX.Y.Z or vX.Y.Z-beta.N → build, sign the update, smoke-test the installer, publish a GitHub Release (a beta is marked
 #   Pre-release) with the text from CHANGELOG.md, and point the update feed (release "updater") at it.
 # * Run manually with "publish" ticked (main only) → the same, for the version in tauri.conf.json; the workflow
 #   creates the tag vX.Y.Z itself. This is the usual way to release.
@@ -120,51 +120,7 @@ jobs:
           fi
 
       # ---- tag: build + GitHub Release + latest.json for the updater --------------------------------------------
-      - name: Build and publish release
-        if: env.PUBLISH == 'true'
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: app
-          tagName: ${{ steps.tag.outputs.name }}
-          releaseCommitish: ${{ github.sha }}
-          releaseName: ${{ steps.notes.outputs.title }}
-          releaseBody: ${{ steps.notes.outputs.body }}
-          releaseDraft: false
-          prerelease: ${{ steps.notes.outputs.prerelease }}
-          includeUpdaterJson: true
-          updaterJsonPreferNsis: true
-
-      # The app polls releases/download/updater/latest.json (tauri.conf.json → plugins.updater). GitHub's
-      # "latest release" skips pre-releases, so the feed lives in its own release and is replaced on every tag;
-      # its notes are the Ukrainian part of the changelog (what the update banner shows).
-      - name: Publish the update feed
-        if: env.PUBLISH == 'true'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          cd "$RUNNER_TEMP"
-          gh release download "${{ steps.tag.outputs.name }}" -R "$GITHUB_REPOSITORY" -p latest.json --clobber
-          node -e '
-            const fs = require("fs");
-            const j = JSON.parse(fs.readFileSync("latest.json", "utf8"));
-            j.notes = fs.readFileSync("app-notes.md", "utf8").trim();
-            fs.writeFileSync("latest.json", JSON.stringify(j, null, 2));
-            console.log("feed:", j.version, Object.keys(j.platforms).join(", "));
-          '
-          if ! gh release view updater -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release create updater -R "$GITHUB_REPOSITORY" --target main --prerelease \
-              --title "Update feed (technical)" \
-              --notes "Used by installed copies of Holos Studio to find new versions. Downloads are on the version releases."
-          fi
-          gh release upload updater latest.json -R "$GITHUB_REPOSITORY" --clobber
-
-      # ---- manual run: build only, installer as a workflow artifact -------------------------------------------
       - name: Build installer
-        if: env.PUBLISH != 'true'
         working-directory: app
         shell: bash
         run: |
@@ -173,7 +129,7 @@ jobs:
 
       # The end of the build log as an annotation: readable from the run summary / API without downloading logs.
       - name: Report build failure
-        if: failure() && env.PUBLISH != 'true'
+        if: failure()
         shell: bash
         run: |
           node -e '
@@ -197,9 +153,58 @@ jobs:
           compression-level: 0
 
       # Install on the runner, let the app create its Python environment, check the engine starts and stops.
+      # Runs before publishing too: a release that does not start is never published.
       - name: Smoke test the installer
-        if: env.PUBLISH != 'true'
         shell: pwsh
         run: |
           $setup = Get-ChildItem app/src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
           ./scripts/smoke-test.ps1 -Installer $setup.FullName
+
+      # ---- publish: GitHub Release + update feed -------------------------------------------------------------
+      - name: Publish release
+        if: env.PUBLISH == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.name }}
+          TITLE: ${{ steps.notes.outputs.title }}
+          PRERELEASE: ${{ steps.notes.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          v="${TAG#v}"
+          out="${RUNNER_TEMP//\\//}/release"; mkdir -p "$out"
+          setup=$(ls app/src-tauri/target/release/bundle/nsis/*-setup.exe | head -1)
+          name="Holos.Studio_${v}_x64-setup.exe"
+          cp "$setup" "$out/$name"
+          cp "$setup.sig" "$out/$name.sig"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${name}"
+          V="$v" URL="$url" SIG="$out/$name.sig" NOTES="$RUNNER_TEMP/app-notes.md" OUT="$out/latest.json" node -e '
+            const fs = require("fs");
+            const e = process.env;
+            const p = { signature: fs.readFileSync(e.SIG, "utf8").trim(), url: e.URL };
+            const j = { version: e.V, notes: fs.readFileSync(e.NOTES, "utf8").trim(), pub_date: new Date().toISOString(),
+                        platforms: { "windows-x86_64": p, "windows-x86_64-nsis": p } };
+            fs.writeFileSync(e.OUT, JSON.stringify(j, null, 2));
+          '
+          flags=(--latest)
+          [ "$PRERELEASE" = "true" ] && flags=(--prerelease --latest=false)
+          gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$TITLE" \
+            --notes-file "$RUNNER_TEMP/body.md" "${flags[@]}" \
+            "$out/$name" "$out/$name.sig" "$out/latest.json"
+          echo "::notice title=Released::$TITLE — https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}"
+
+      # The app polls releases/download/updater/latest.json (tauri.conf.json → plugins.updater). GitHub's
+      # "latest release" skips pre-releases, so the feed lives in its own release and is replaced on every release.
+      - name: Publish the update feed
+        if: env.PUBLISH == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! gh release view updater -R "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release create updater -R "$GITHUB_REPOSITORY" --target main --prerelease --latest=false \
+              --title "Update feed (technical)" \
+              --notes "Used by installed copies of Holos Studio to find new versions. Downloads are on the version releases — do not delete this release."
+          fi
+          gh release upload updater "${RUNNER_TEMP//\\//}/release/latest.json" -R "$GITHUB_REPOSITORY" --clobber

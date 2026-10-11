@@ -91,6 +91,13 @@ Tools mirror engine operations, for example: `open_project`, `get_transcript`, `
 
 ## Packaging
 
-- Engine bundled as a sidecar executable (PyInstaller) inside the Tauri app.
-- FFmpeg shipped as an LGPL build to stay license-compatible with MIT distribution.
-- CUDA runtime: use the user's installed NVIDIA driver; fall back to CPU (int8) when no GPU is present.
+See [RELEASING.md](RELEASING.md).
+
+- Windows NSIS installer (per-user) with the app, the engine *source*, `uv.exe` and `ffmpeg.exe`.
+- On first launch the app runs `uv sync` into `%LOCALAPPDATA%\com.brainfromukraine.holos` (Python 3.12, CUDA wheels),
+  then starts `holos serve` hidden on a free port with a random token (`app/src-tauri/src/engine.rs`).
+- FFmpeg: a GPL "essentials" build (the bundled video template uses libx264); it is a separate executable with its
+  licence shipped next to it.
+- CUDA runtime: NVIDIA cuBLAS / cuDNN wheels from PyPI + the user's installed NVIDIA driver; CPU (int8) fallback when
+  no GPU is present.
+- Updates: Tauri updater, signed, from GitHub Releases.

@@ -31,6 +31,8 @@ Settings → Developer → Edit Config, then add (adjust the path):
 }
 ```
 
+With the installed app (no repository checkout) use the engine it created — see [RELEASING.md](RELEASING.md#claude-desktop-mcp-with-the-installed-app).
+
 Restart Claude Desktop, then ask: *"Make chapters for my latest Holos episode."*
 
 Any other MCP client: run `uv --directory <repo>/engine run holos mcp` over stdio.

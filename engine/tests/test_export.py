@@ -122,7 +122,7 @@ def test_export_all_deliverables(tmp_path, home):
                            progress=lambda s, d, t, x: stages.append((s, d, t)))
     assert set(r["files"]) == {"wav", "mp3", "timecodes", "video"}
     assert ("video", 1, 2) in stages
-    assert (tmp_path / "out" / "таймкоди.txt").read_text(encoding="utf-8").splitlines()[0] == "00:00 Intro"
+    assert (tmp_path / "out" / "timecodes.txt").read_text(encoding="utf-8").splitlines()[0] == "00:00 Intro"
     for kind in ("mp3", "video"):
         info = _probe(r["files"][kind])
         assert [c["tags"]["title"] for c in info["chapters"]] == ["Intro", "Two", "Three"]

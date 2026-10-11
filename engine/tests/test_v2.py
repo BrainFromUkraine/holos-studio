@@ -85,11 +85,11 @@ def test_mouth_clicks_found_and_removed_without_touching_voice():
 def test_new_episode_copies_recordings_and_applies_automation(tmp_path, home):
     files = _files(tmp_path)
     res = projects.new_episode("Випуск 7", files)
-    proj = home / "Проєкти" / "Випуск 7" / "Випуск 7.holos"
+    proj = home / "Projects" / "Випуск 7" / "Випуск 7.holos"
     assert res["path"] == str(proj) and proj.is_file()
-    assert sorted(f.name for f in (proj.parent / "Записи").iterdir()) == ["POD00001.WAV", "POD00002.WAV"]
+    assert sorted(f.name for f in (proj.parent / "Recordings").iterdir()) == ["POD00001.WAV", "POD00002.WAV"]
     p = Project.load(proj)
-    assert all("Записи" in s.path for s in p.sources)
+    assert all("Recordings" in s.path for s in p.sources)
     pauses = [e for e in p.edits if e.type == "pause"]
     assert pauses and all(e.status == ("accepted" if e.end - e.start >= 0.9 else "rejected") for e in pauses)
     assert not any(e.status == "suggested" for e in p.edits)
@@ -147,7 +147,7 @@ def test_timeline_splices_and_multi_range_cut(tmp_path, home):
     n0 = len(tl["splices"])
     r = c.post("/api/projects/edit", json={"path": path, "op": "cuts", "snap": False, "ranges": [
         {"source": "s1", "start": 8.0, "end": 9.0}, {"source": "s2", "start": 0.1, "end": 0.25}]}).json()
-    assert len(r["ids"]) == 2 and len(r["splices"]) >= n0 + 1 and r["history"]["undo_label"] == "Вирізати діапазон"
+    assert len(r["ids"]) == 2 and len(r["splices"]) >= n0 + 1 and r["history"]["undo_label"] == "Cut range"
     first = r["ids"][0]
     sp = next(x for x in r["splices"] if first in x["edits"])
     r = c.post("/api/projects/edit", json={"path": path, "op": "status", "ids": sp["edits"], "status": "rejected"}).json()
@@ -204,7 +204,7 @@ def test_mcp_tools_edit_in_episode_time(tmp_path, home):
     assert any(r["cut_ids"][0] in s["edit_ids"] for s in spl)
     M.restore(path, r["cut_ids"])
     assert abs(C.episode_length(Project.load(path)) - L0) < 1e-6
-    assert M.undo(path)["undone"] == "Залишити"
+    assert M.undo(path)["undone"] == "Keep"
     M.set_automation(path, {"clicks": "off"})
     assert M.get_automation(path)["clicks"] == "off"
     assert M.list_projects()[0]["name"] == "M"

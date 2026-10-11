@@ -44,6 +44,12 @@ lives in the project's design canvas; this file is the source of truth for the i
 Spectrogram: intensity heat map (like iZotope RX) `#000000 → #160a33 → #3b137a → #7a24b8 → #c2329e → #ff5e3a → #ffb43c → #fff6d8`,
 80 dB range, mel frequency scale with grid lines and labels at 100 / 250 / 500 / 1k / 2k / 4k / 8k Hz and a −80…0 dB legend.
 
+## Language
+
+English by default, Ukrainian selectable in Settings (switches instantly). Text is written in English and translated
+with `t()` (app/src/lib/i18n); terms: app/src/lib/i18n/GLOSSARY.md. Folder and file names the app creates are
+always English (`Projects`, `Recordings`, `export`, `timecodes.txt`).
+
 ## Type
 
 - UI: **IBM Plex Sans** 13 px (12 px dense lists, 14 px panel titles).
@@ -56,7 +62,7 @@ Spectrogram: intensity heat map (like iZotope RX) `#000000 → #160a33 → #3b13
 2. **New project** — name (the episode number increments), destination folder, file table with per-stage
    progress (copy → analysis → speech recognition → cuts → view), language and glossary, a summary of
    the automation that will be applied. Recordings are copied to
-   `Documents\Holos Studio\Проєкти\<episode>\Записи`; the editor opens when processing finishes.
+   `Documents\Holos Studio\Projects\<episode>\Recordings`; the editor opens when processing finishes.
 3. **Editor** — see below.
 4. **Automation** — per project or as the default for new projects: pauses (longer than X → Y, crossfade),
    mouth clicks (off / light / normal / strong), breaths (soften / cut / off), which mistakes are cut
@@ -65,7 +71,8 @@ Spectrogram: intensity heat map (like iZotope RX) `#000000 → #160a33 → #3b13
 5. **Export** — audio only (WAV / MP3 with chapters) or video through a template with a live preview
    rendered from the episode; editable timecodes (or ask Claude via MCP); pre-export checks; files go to
    `export\` inside the project folder.
-6. **Settings** — step-by-step MCP setup with the ready configuration, folders, version.
+6. **Settings** — interface language (English by default, Ukrainian), step-by-step MCP setup with the ready
+   configuration, folders, version.
 
 ## Editor layout
 

@@ -1,5 +1,7 @@
-"""Project folders: `<HOLOS_HOME>/Проєкти/<episode name>/` with the project file, a copy of the recordings
-(`Записи/`) and, after export, `export/`. Projects are self-contained: originals can be moved or deleted.
+"""Project folders: `<HOLOS_HOME>/Projects/<episode name>/` with the project file, a copy of the recordings
+(`Recordings/`) and, after export, `export/`. Projects are self-contained: originals can be moved or deleted.
+Folder and file names are always English, whatever the interface language. Early builds used Ukrainian names
+(`Проєкти/`, `Записи/`); such folders keep working and are still listed.
 """
 from __future__ import annotations
 
@@ -11,12 +13,14 @@ from pathlib import Path
 from . import templates as T
 from .ops import Progress, _noop, cache_dir, create_project, process_project, safe_name
 
-RECORDINGS = "Записи"
+RECORDINGS = "Recordings"
+PROJECTS = "Projects"
+LEGACY_PROJECTS = "Проєкти"   # folder name used before 0.2.0-beta.1
 
 
 def projects_root() -> Path:
     st = T.load_state()
-    root = Path(st["projects_dir"]) if st.get("projects_dir") else T.home() / "Проєкти"
+    root = Path(st["projects_dir"]) if st.get("projects_dir") else T.home() / PROJECTS
     return root
 
 
@@ -132,10 +136,10 @@ def list_projects(running: set[str] | None = None) -> list[dict]:
     from .project import Project
     running = running or set()
     seen: dict[str, Path] = {}
-    root = projects_root()
-    if root.is_dir():
-        for f in root.glob("*/*.holos"):
-            seen[str(f.resolve())] = f
+    for root in (projects_root(), T.home() / LEGACY_PROJECTS):
+        if root.is_dir():
+            for f in root.glob("*/*.holos"):
+                seen.setdefault(str(f.resolve()), f)
     for r in T.recent_projects():
         f = Path(r)
         if f.is_file():

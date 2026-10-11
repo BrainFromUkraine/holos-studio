@@ -51,7 +51,7 @@ One line about the release.
 ```
 
 `scripts/release-notes.mjs <version> release|app|title` turns it into the GitHub release text (both languages), the
-update-banner text (Ukrainian part, shown under **Що нового**) and the title (`Holos Studio 0.3.0 Beta 2`).
+update-banner text (both parts; the app shows the one in the interface language under **What's new**) and the title (`Holos Studio 0.3.0 Beta 2`).
 
 ## Cutting a release
 
@@ -78,7 +78,7 @@ update-banner text (Ukrainian part, shown under **Що нового**) and the t
    - `Holos.Studio_<version>_x64-setup.exe.sig` — its updater signature,
    - `latest.json` — the update manifest.
 
-   It then copies `latest.json` (with the Ukrainian notes) to the release tagged **`updater`** — the update feed
+   It then copies `latest.json` (with the notes in both languages) to the release tagged **`updater`** — the update feed
    installed apps poll (`plugins.updater.endpoints` in `tauri.conf.json`). GitHub's "latest release" ignores
    pre-releases, so the feed has its own fixed address. Do not delete that release.
 

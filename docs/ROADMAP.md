@@ -26,7 +26,11 @@ Design decisions: [DESIGN.md](DESIGN.md) — automatic first, pro audio-tool lay
 - ✅ Engine `process` pipeline: analyze → transcribe (skipped without ASR) → suggest, confident edits auto-applied
 - ✅ App scaffold: Next.js (static export) + Tauri v2 window, studio-green theme, IBM Plex
 - ✅ Import screen: drag & drop / file dialog, duplicates, settings (language, glossary, loudness, auto-apply), live progress
-- ✅ Questions: Cut / Keep buttons (Y / N shortcuts), decisions saved to the project
+- ✅ No questions: automation decides (cut / keep per kind), everything visible and reversible in the editor
+- ✅ Start screen with projects; project folders with copied recordings
+- ✅ Automation screen: pauses X→Y, mouth clicks, breaths, repeats / retakes / fillers, loudness, voice chain
+- ✅ Editor v2 like DaVinci Fairlight: finished-episode track, splices, blade / range ripple cuts, chapter markers
+- ✅ Export v2: audio or video, live template preview rendered from the episode, editable timecodes
 - ✅ Editor: whole-episode overview + zoomable lanes (clips, waveform, heat-map spectrogram, words, edits, breaths, loudness)
 - ✅ Every edit visible and reversible; drag or nudge boundaries, snap to silence; own cuts from a waveform range or words
 - ✅ Playback: result (removed parts skipped) / original; listen to an edit with 2 s around it

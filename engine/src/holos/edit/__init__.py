@@ -96,7 +96,7 @@ def build_program(p: Project) -> Program:
         x, fsr = load_mono(src.path)
         if fsr != sr:
             raise ValueError(f"{src.path}: sample rate {fsr} != project {sr} (resampling not supported yet)")
-        g_db = ts.level_match_lufs - A.loudness_lufs
+        g_db = (ts.level_match_lufs - A.loudness_lufs) if p.automation.level_match else 0.0
         prog.level_gain_db[clip.source] = round(g_db, 2)
         x = x * db2a(g_db)
         edits = p.edits_for(clip.source)

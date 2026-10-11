@@ -2,7 +2,15 @@ import type { Timeline } from "./timeline";
 
 // Client for the local Holos engine API (`holos serve`).
 
-export const ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL ?? "http://127.0.0.1:8765";
+let ENGINE_URL = process.env.NEXT_PUBLIC_ENGINE_URL ?? "http://127.0.0.1:8765";
+let ENGINE_TOKEN: string | null = null;
+
+/** The desktop app starts the engine itself and passes its address and token here. */
+export function setEngineConnection(url: string, tok: string) {
+  ENGINE_URL = url.replace(/\/$/, "");
+  ENGINE_TOKEN = tok;
+}
+export const engineUrl = () => ENGINE_URL;
 
 export type Health = {
   name: string;
@@ -23,19 +31,6 @@ export type FileInfo = {
   duplicate_of: string | null;
 };
 
-export type Question = {
-  id: string;
-  kind: string;
-  source: string;
-  start: number;
-  end: number;
-  text: string;
-  before: string;
-  after: string;
-  reason: string;
-  episode_time: number | null;
-};
-
 export type Summary = {
   name: string;
   sample_rate: number;
@@ -45,12 +40,41 @@ export type Summary = {
   analyzed: number;
   transcribed: number;
   counts: Record<string, Record<string, number>>;
-  questions: Question[];
-  settings: { language: string; glossary: string[]; model: string; target_lufs: number | null; auto_apply: string[] };
+  settings: { language: string; glossary: string[]; model: string; target_lufs: number | null; automation: Automation };
   chapters: Chapter[];
   chapter_warnings: string[];
   export: ExportSettings;
 };
+
+export type Automation = {
+  pauses: boolean;
+  pause_max: number;
+  pause_target: number;
+  breaths: "duck" | "cut" | "off";
+  breath_db: number;
+  clicks: "off" | "light" | "normal" | "strong";
+  kinds: Record<string, "cut" | "keep">;
+  fill_dropouts: boolean;
+  level_match: boolean;
+  crossfade_ms: number;
+  target_lufs: number;
+  voice: Record<string, boolean>;
+};
+
+export type ProjectRow = {
+  path: string;
+  name: string;
+  folder: string;
+  modified: number;
+  length: number | null;
+  recorded: number;
+  files: number;
+  status: "processing" | "ready" | "exported" | "new";
+  chapters: number;
+  thumb: number[];
+};
+
+export type Settings = { projects_dir: string; home: string; templates_dir: string; mcp_last_seen: number | null; mcp_config?: unknown; version?: string };
 
 export type Chapter = { title: string; time: number; end: number; origin: string; source: string; at: number };
 
@@ -121,7 +145,8 @@ export type ExportResult = {
 
 export type EditRequest = {
   path: string;
-  op: "status" | "adjust" | "cut" | "cut_words" | "delete" | "undo" | "redo";
+  op: "status" | "adjust" | "cut" | "cuts" | "cut_words" | "delete" | "undo" | "redo";
+  ranges?: { source: string; start: number; end: number }[];
   ids?: string[];
   status?: "accepted" | "rejected" | "suggested";
   id?: string;
@@ -158,6 +183,7 @@ export type CreateRequest = {
 };
 
 function token(): string {
+  if (ENGINE_TOKEN !== null) return ENGINE_TOKEN;
   if (typeof window === "undefined") return "";
   try {
     return localStorage.getItem("holos.token") ?? "";
@@ -194,8 +220,23 @@ export const engine = {
   create: (req: CreateRequest) => call<{ path: string; summary: Summary; skipped: FileInfo[] }>("POST", "/api/projects", req),
   summary: (path: string) => call<Summary>("GET", `/api/projects/summary?path=${encodeURIComponent(path)}`),
   process: (path: string) => call<Job>("POST", "/api/projects/process", { path }),
-  decide: (path: string, id: string, decision: "cut" | "keep") =>
-    call<Summary>("POST", "/api/projects/decision", { path, id, decision }),
+  projects: () => call<{ root: string; projects: ProjectRow[] }>("GET", "/api/projects/list"),
+  newEpisode: (req: { name: string; files: string[]; automation?: Partial<Automation>; language?: string; glossary?: string[] }) =>
+    call<Job>("POST", "/api/episodes", req),
+  open: (path: string) => call<Summary>("POST", "/api/projects/open", { path }),
+  stamp: (path: string) => call<{ mtime: number | null }>("GET", `/api/projects/stamp?path=${encodeURIComponent(path)}`),
+  setAutomation: (path: string, changes: Partial<Automation>) =>
+    call<Timeline>("PUT", "/api/projects/automation", { path, changes }),
+  automationDefaults: () => call<Automation>("GET", "/api/automation/defaults"),
+  saveAutomationDefaults: (automation: Automation) => call<Automation>("PUT", "/api/automation/defaults", { automation }),
+  settings: () => call<Settings>("GET", "/api/settings"),
+  saveSettings: (s: { projects_dir?: string }) => call<Settings>("PUT", "/api/settings", s),
+  preview: (path: string, template: string, params: Record<string, unknown>, seconds = 6) =>
+    call<{ video: string; poster: string; key: string }>("POST", "/api/templates/preview", { path, template, params, seconds }),
+  /** A file from a project's cache (previews), for <video>/<img>. */
+  cacheUrl(file: string): string {
+    return `${ENGINE_URL}/api/files/cache?path=${encodeURIComponent(file)}&token=${encodeURIComponent(token())}`;
+  },
   templates: (path?: string) =>
     call<{ user_dir: string; templates: TemplateInfo[] }>("GET", `/api/templates${path ? `?path=${encodeURIComponent(path)}` : ""}`),
   setChapters: (path: string, chapters: { time: number; title: string }[]) =>
@@ -216,6 +257,7 @@ export const engine = {
   },
   loudness: (path: string, source: string) =>
     call<{ hop: number; values: number[] }>("GET", `/api/projects/loudness?path=${encodeURIComponent(path)}&source=${encodeURIComponent(source)}`),
+  job: (id: string) => call<Job>("GET", `/api/jobs/${id}`),
   /** Streams job progress; returns a function that stops listening. */
   watch(jobId: string, onUpdate: (j: Job) => void): () => void {
     const es = new EventSource(`${ENGINE_URL}/api/jobs/${jobId}/events?token=${encodeURIComponent(token())}`);
@@ -243,6 +285,7 @@ export function fmtTimecode(s: number | null | undefined): string {
 }
 
 const CURRENT = "holos.currentProject";
+const CURRENT_NAME = "holos.currentProjectName";
 export const currentProject = {
   get(): string | null {
     try {
@@ -251,9 +294,25 @@ export const currentProject = {
       return null;
     }
   },
-  set(path: string) {
+  name(): string | null {
+    try {
+      return localStorage.getItem(CURRENT_NAME);
+    } catch {
+      return null;
+    }
+  },
+  set(path: string, name?: string) {
     try {
       localStorage.setItem(CURRENT, path);
+      if (name) localStorage.setItem(CURRENT_NAME, name);
+      window.dispatchEvent(new Event("holos-project"));
+    } catch {}
+  },
+  clear() {
+    try {
+      localStorage.removeItem(CURRENT);
+      localStorage.removeItem(CURRENT_NAME);
+      window.dispatchEvent(new Event("holos-project"));
     } catch {}
   },
 };

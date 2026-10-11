@@ -21,10 +21,7 @@ def projects_root() -> Path:
 
 
 def set_projects_root(path: str) -> Path:
-    st = T.load_state()
-    st["projects_dir"] = str(Path(path))
-    T._state_path().parent.mkdir(parents=True, exist_ok=True)
-    T._state_path().write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
+    T.update_state(lambda st: st.__setitem__("projects_dir", str(Path(path))))
     return projects_root()
 
 

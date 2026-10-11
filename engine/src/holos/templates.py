@@ -19,6 +19,8 @@ import os
 import re
 import subprocess
 import sys
+import threading
+import time
 from collections import deque
 from pathlib import Path
 from typing import Any, Callable, Literal
@@ -134,22 +136,46 @@ def _state_path() -> Path:
     return home() / "state.json"
 
 
+_state_lock = threading.RLock()
+
+
 def load_state() -> dict:
-    try:
-        return json.loads(_state_path().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    with _state_lock:
+        for _ in range(3):                      # another process (the MCP server) may be mid-replace
+            try:
+                return json.loads(_state_path().read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                return {}
+            except (OSError, ValueError):
+                time.sleep(0.02)
         return {}
+
+
+def save_state(st: dict) -> None:
+    """Atomic write (temp file + replace): a reader never sees half a file."""
+    with _state_lock:
+        f = _state_path()
+        try:
+            f.parent.mkdir(parents=True, exist_ok=True)
+            tmp = f.with_name(f"{f.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+            tmp.write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
+            os.replace(tmp, f)
+        except OSError:
+            pass
+
+
+def update_state(fn) -> dict:
+    """Read-modify-write under the lock; `fn(state)` changes it in place and may return False to skip saving."""
+    with _state_lock:
+        st = load_state()
+        if fn(st) is not False:
+            save_state(st)
+        return st
 
 
 def remember(template_id: str, params: dict, project: str) -> None:
     """Last-used parameters per template (for the next episode)."""
-    st = load_state()
-    st.setdefault("templates", {})[template_id] = {"params": params, "project": project}
-    try:
-        _state_path().parent.mkdir(parents=True, exist_ok=True)
-        _state_path().write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
-    except OSError:
-        pass
+    update_state(lambda st: st.setdefault("templates", {}).__setitem__(template_id, {"params": params, "project": project}))
 
 
 def initial_params(t: Template, project_params: dict | None, project: str) -> dict:
@@ -251,14 +277,15 @@ def run(t: Template, audio: str, out: str, params: dict, preview: float = 0,
 
 # ---- recent projects (for the MCP server and the app) -------------------------------------------
 def touch_recent(project: str, keep: int = 20) -> None:
-    st = load_state()
     p = str(Path(project).resolve())
-    st["recent"] = [p] + [x for x in st.get("recent", []) if x != p][: keep - 1]
-    try:
-        _state_path().parent.mkdir(parents=True, exist_ok=True)
-        _state_path().write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
-    except OSError:
-        pass
+
+    def fn(st: dict):
+        recent = st.get("recent", [])
+        if recent[:1] == [p]:
+            return False                        # already first: nothing to write
+        st["recent"] = [p] + [x for x in recent if x != p][: keep - 1]
+
+    update_state(fn)
 
 
 def recent_projects() -> list[str]:

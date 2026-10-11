@@ -86,14 +86,20 @@ export function estimateProgress(lines: string[]): SetupProgress {
 
   let total = 0;
   let got = 0;
+  let count = 0;
   for (const [name, mb] of sizes) {
     total += mb;
-    if (done.has(name)) got += mb;
+    if (done.has(name)) {
+      got += mb;
+      count++;
+    }
   }
   if (total > 0) {
     const pythonPending = [...sizes.keys()].some((n) => n.startsWith("cpython") && !done.has(n));
+    // Mostly by size (the CUDA wheels are most of it), partly by count so the bar moves while small ones finish.
+    const frac = 0.8 * (got / total) + 0.2 * (count / sizes.size);
     return {
-      pct: 4 + Math.round((got / total) * 82),
+      pct: 4 + Math.round(frac * 82),
       stage: pythonPending ? "Завантаження Python 3.12" : "Завантаження бібліотек",
       detail: `${Math.round(got)} / ${Math.round(total)} МБ`,
     };

@@ -30,9 +30,9 @@ jobs:
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
       IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -107,7 +107,23 @@ jobs:
         if: env.IS_TAG != 'true'
         working-directory: app
         shell: bash
-        run: npm run tauri -- build ${{ steps.signing.outputs.config }}
+        run: |
+          set -o pipefail
+          npm run tauri -- build ${{ steps.signing.outputs.config }} 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      # The end of the build log as an annotation: readable from the run summary / API without downloading logs.
+      - name: Report build failure
+        if: failure() && env.IS_TAG != 'true'
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs");
+            const f = process.env.RUNNER_TEMP + "/build.log";
+            const lines = fs.existsSync(f) ? fs.readFileSync(f, "utf8").split(/\r?\n/) : ["(no build log)"];
+            const tail = lines.filter((l) => l.trim()).slice(-60).join("\n");
+            const esc = tail.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+            console.log("::error title=Build log (tail)::" + esc);
+          '
 
       - name: Upload installer artifact
         if: env.IS_TAG != 'true'

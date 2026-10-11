@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from typing import Callable, Iterable
 
+from . import automation
 from .project import Clip, CutEdit, Project, Source, dump_json, natural_key, sha256_file
 
 Progress = Callable[[str, int, int, str], None]
@@ -86,7 +87,7 @@ def create_project(path: str | Path, files: Iterable[str | Path], name: str | No
 
 
 def analyze_project(p: Project, path: str | Path, progress: Progress = _noop) -> dict:
-    """Breaths, long pauses, drop-outs, loudness. Auto-applies the kinds listed in `p.auto_apply`."""
+    """Breaths, pauses, drop-outs, loudness. Which of them are applied is decided by `p.automation`."""
     from .analysis import analyze_source
     from .io import load_mono
     p.edits = [e for e in p.edits if e.type not in ANALYSIS_TYPES]
@@ -99,10 +100,9 @@ def analyze_project(p: Project, path: str | Path, progress: Progress = _noop) ->
         A, edits = analyze_source(x, sr, s.id, p.analysis_settings)
         for e in edits:
             counts[e.type] += 1
-            if e.type in p.auto_apply:
-                e.status = "accepted"
         p.analysis[s.id] = A
         p.edits.extend(edits)
+    automation.apply(p)
     p.save(path)
     progress("analyze", n, n, "done")
     return {"seconds": round(time.time() - t0, 1), **counts}
@@ -140,7 +140,7 @@ def transcribe_project(p: Project, path: str | Path, progress: Progress = _noop)
 
 
 def suggest_project(p: Project, path: str | Path, use_audio: bool = True, progress: Progress = _noop) -> dict:
-    """Transcript-based suggestions. Kinds in `p.auto_apply` are accepted, the rest become questions."""
+    """Transcript-based edits (repeats, retakes, fillers…); `p.automation.kinds` decides which are cut."""
     from .analysis.features import frame_features
     from .io import load_mono
     from .suggest import suggest
@@ -159,18 +159,20 @@ def suggest_project(p: Project, path: str | Path, use_audio: bool = True, progre
             progress("suggest", i, n, Path(s.path).name)
             frames[s.id] = frame_features(*audio(s.id))
     new = suggest(p, frames, audio=audio if use_audio else None)
-    old = {(e.source, e.kind, round(e.start, 1), round(e.end, 1)): e.status
-           for e in p.edits if isinstance(e, CutEdit) and e.kind in SUGGEST_KINDS}
-    for e in new:
-        key = (e.source, e.kind, round(e.start, 1), round(e.end, 1))
-        e.status = old.get(key) or ("accepted" if e.kind in p.auto_apply else "suggested")
+    old = {(e.source, e.kind, round(e.start, 1), round(e.end, 1)): e
+           for e in p.edits if isinstance(e, CutEdit) and e.kind in SUGGEST_KINDS and e.touched}
+    for e in new:                       # keep decisions the user made on the same suggestion earlier
+        prev = old.get((e.source, e.kind, round(e.start, 1), round(e.end, 1)))
+        if prev is not None:
+            e.status, e.touched = prev.status, True
     p.edits = [e for e in p.edits if not (isinstance(e, CutEdit) and e.kind in SUGGEST_KINDS)] + new
+    automation.apply(p)
     p.save(path)
     progress("suggest", n, n, "done")
     by: dict[str, int] = {}
     for e in new:
         by[e.kind] = by.get(e.kind, 0) + 1
-    return {"total": len(new), "by_kind": by, "questions": sum(e.status == "suggested" for e in new)}
+    return {"total": len(new), "by_kind": by, "applied": sum(e.status == "accepted" for e in new)}
 
 
 def process_project(path: str | Path, progress: Progress = _noop) -> dict:
@@ -216,23 +218,17 @@ def summary(p: Project) -> dict:
         k = e.kind if isinstance(e, CutEdit) and e.kind else e.type
         counts.setdefault(k, {}).setdefault(e.status, 0)
         counts[k][e.status] += 1
-    questions = []
-    for e in p.edits:
-        if isinstance(e, CutEdit) and e.status == "suggested":
-            questions.append({"id": e.id, "kind": e.kind, "source": e.source, "start": e.start, "end": e.end,
-                              "text": e.text, "before": e.before, "after": e.after, "reason": e.reason,
-                              "episode_time": round(program_time(p, e.source, e.start, tm), 2) if tm else None})
     length = round(episode_length(p), 2) if tm else None
     chapter_rows = resolved(p) if tm else []
     return {"name": p.name, "sample_rate": p.sample_rate, "sources": sources,
             "recorded_s": round(sum(s.duration for s in p.sources), 2), "edited_s": length,
             "analyzed": len(p.analysis), "transcribed": len(p.transcript),
-            "counts": counts, "questions": sorted(questions, key=lambda q: q["episode_time"] or 0),
+            "counts": counts,
             "chapters": chapter_rows, "chapter_warnings": check_youtube(chapter_rows),
             "export": p.export.model_dump(),
             "settings": {"language": p.asr.language, "glossary": p.asr.glossary, "model": p.asr.model,
                          "target_lufs": next((c.params.get("target_lufs") for c in p.chain if c.module == "loudness"), None),
-                         "auto_apply": p.auto_apply}}
+                         "automation": p.automation.model_dump()}}
 
 
 # ---- export -------------------------------------------------------------------------------------
@@ -345,7 +341,7 @@ def export_project(path: str | Path, out_dir: str | Path | None = None, name: st
             _run_ffmpeg(args + ["-c:a", "libmp3lame", "-b:a", f"{ex.mp3_kbps}k", "-id3v2_version", "3", str(target)])
             files["mp3"] = str(target)
         if ex.chapters_txt and rows:
-            target = out / f"{base}_timecodes.txt"
+            target = out / "таймкоди.txt"
             target.write_text(C.youtube_text(rows), encoding="utf-8")
             files["timecodes"] = str(target)
 
@@ -389,3 +385,35 @@ def export_project(path: str | Path, out_dir: str | Path | None = None, name: st
         dump_json({**result, "render": report}, out / f"{base}_report.json")
     progress("done", 1, 1, str(out))
     return result
+
+
+def template_preview(path: str | Path, template: str, params: dict, seconds: float = 6.0,
+                     progress: Progress = _noop) -> dict:
+    """Short real render of a video template with the episode's audio, for the live preview.
+    Cached by template + parameters + audio, so flipping back to a variant is instant."""
+    from . import templates as T
+    path = Path(path)
+    p = Project.load(path)
+    tpl = T.get(template)
+    T.build_args(tpl.manifest, params)
+    if tpl.missing:
+        raise T.TemplateError(f"template '{tpl.manifest.name}' needs Python modules: {', '.join(tpl.missing)}"
+                              + (f" — install with: {tpl.manifest.install}" if tpl.manifest.install else ""))
+    key = hashlib.sha256(json.dumps([template, params, seconds, fingerprint(p)], sort_keys=True,
+                                    default=str).encode()).hexdigest()[:16]
+    d = cache_dir(path) / "previews"
+    d.mkdir(parents=True, exist_ok=True)
+    video, poster = d / f"{key}.mp4", d / f"{key}.jpg"
+    if not (video.is_file() and poster.is_file()):
+        master_wav, _ = master(p, path, progress)
+        raw = d / f"{key}.raw.{tpl.manifest.output}"
+        progress("preview", 0, int(seconds), tpl.manifest.name)
+        T.run(tpl, str(master_wav), str(raw), params, seconds,
+              lambda done, total, detail: progress("preview", max(0, int(done)), int(seconds), detail))
+        _run_ffmpeg(["-i", str(raw), "-i", str(master_wav), "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
+                     "-c:a", "aac", "-b:a", "192k", "-t", f"{seconds:g}", "-shortest", "-movflags", "+faststart",
+                     str(video)])
+        raw.unlink(missing_ok=True)
+        _run_ffmpeg(["-ss", f"{min(seconds * 0.6, seconds - 0.5):.2f}", "-i", str(video), "-frames:v", "1",
+                     "-vf", "scale=640:-2", "-q:v", "4", str(poster)])
+    return {"video": str(video), "poster": str(poster), "key": key}

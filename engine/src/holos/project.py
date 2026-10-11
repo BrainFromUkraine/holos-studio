@@ -13,7 +13,7 @@ from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, Field
 
-PROJECT_VERSION = 1
+PROJECT_VERSION = 2
 
 EditStatus = Literal["suggested", "accepted", "rejected"]
 
@@ -66,6 +66,7 @@ class _EditBase(BaseModel):
     end: float
     status: EditStatus = "suggested"
     reason: str = ""
+    touched: bool = False           # changed by the user (or Claude) — automation never overrides it
 
 
 class GainEdit(_EditBase):
@@ -108,6 +109,24 @@ class VideoExport(BaseModel):
     params: dict[str, Any] = {}
 
 
+CutPolicy = Literal["cut", "keep"]
+
+
+class Automation(BaseModel):
+    """What the program does by itself after import ("Автоматика"). Manual edits are never overridden."""
+    pauses: bool = True
+    pause_max: float = 0.9          # pauses longer than this…
+    pause_target: float = 0.7       # …are shortened to this (middle removed)
+    breaths: Literal["duck", "cut", "off"] = "duck"
+    breath_db: float = -12.0        # "duck" level; "cut" mutes down to room tone
+    clicks: Literal["off", "light", "normal", "strong"] = "normal"   # mouth clicks / saliva
+    kinds: dict[str, CutPolicy] = Field(default_factory=lambda: {
+        "repeat": "cut", "retake": "cut", "filler": "cut",
+        "fragment": "keep", "sound": "keep", "unclear": "keep"})
+    fill_dropouts: bool = True
+    level_match: bool = True
+
+
 class ChainStep(BaseModel):
     module: str
     enabled: bool = True
@@ -142,6 +161,7 @@ class ExportSettings(BaseModel):
 def default_chain() -> list[ChainStep]:
     return [
         ChainStep(module="highpass", params={"freq": 75.0, "order": 4}),
+        ChainStep(module="mouthclick", params={"strength": "normal"}),
         ChainStep(module="declick", params={"threshold": 6.0}),
         ChainStep(module="eq", params={"bands": [
             {"freq": 350.0, "gain": -2.0, "width_oct": 1.2},
@@ -171,11 +191,28 @@ class Project(BaseModel):
     auto_apply: list[str] = Field(default_factory=lambda: ["gain", "pause", "fill", "retake", "repeat", "filler"])
     export: ExportSettings = ExportSettings()
     chapters: list[Chapter] = []
+    automation: Automation = Automation()
 
     # ---- persistence -------------------------------------------------
     @classmethod
     def load(cls, path: str | Path) -> "Project":
-        return cls.model_validate_json(Path(path).read_text(encoding="utf-8"))
+        p = cls.model_validate_json(Path(path).read_text(encoding="utf-8"))
+        if p.version < PROJECT_VERSION:
+            p._migrate()
+        return p
+
+    def _migrate(self) -> None:
+        """v1 → v2: questions are gone, automation decides; answers given to old questions are kept."""
+        from .automation import apply
+        if self.version < 2:
+            ask = {"unclear", "fragment", "sound"}
+            for e in self.edits:
+                if isinstance(e, CutEdit) and (e.kind == "manual" or (e.kind in ask and e.status != "suggested")):
+                    e.touched = True
+            self.automation.kinds.update({k: ("cut" if k in self.auto_apply else "keep")
+                                          for k in ("repeat", "retake", "filler")})
+            apply(self)
+        self.version = PROJECT_VERSION
 
     def save(self, path: str | Path) -> None:
         Path(path).write_text(self.model_dump_json(indent=1), encoding="utf-8")

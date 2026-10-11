@@ -1,17 +1,66 @@
 {
  "id": "waveform",
- "name": "Waveform (example)",
+ "name": "Хвиля · приклад",
  "kind": "video",
- "description": "Minimal example: background image or solid colour with an animated waveform. Copy this folder to make your own template.",
+ "description": "Простий приклад: фонове фото або чорний фон і анімована хвиля голосу. Скопіюйте цю папку, щоб зробити свій шаблон.",
  "entry": "waveform.py",
- "imports": ["soundfile"],
- "args": {"audio": "--audio", "out": "--out", "preview": "--preview"},
- "params": [
-  {"key": "background", "label": "Background image (16:9)", "type": "file", "arg": "--background", "filters": ["png", "jpg", "jpeg"], "help": "Optional. Without it the background is black."},
-  {"key": "color", "label": "Waveform colour", "type": "choice", "arg": "--color", "default": "22D3EE",
-   "options": [{"value": "22D3EE", "label": "Cyan"}, {"value": "3DDC84", "label": "Green"}, {"value": "FFFFFF", "label": "White"}]},
-  {"key": "height", "label": "Waveform height, px", "type": "int", "arg": "--height", "default": 320, "min": 80, "max": 900, "step": 10}
+ "imports": [
+  "soundfile"
  ],
- "progress": {"regex": "^\\s*(\\d+(?:\\.\\d+)?) / (\\d+(?:\\.\\d+)?) s", "done": 1, "total": 2},
+ "args": {
+  "audio": "--audio",
+  "out": "--out",
+  "preview": "--preview"
+ },
+ "params": [
+  {
+   "key": "background",
+   "label": "Фонове фото (16:9)",
+   "type": "file",
+   "arg": "--background",
+   "filters": [
+    "png",
+    "jpg",
+    "jpeg"
+   ],
+   "help": "Необовʼязково. Без нього фон чорний."
+  },
+  {
+   "key": "color",
+   "label": "Колір хвилі",
+   "type": "choice",
+   "arg": "--color",
+   "default": "22D3EE",
+   "options": [
+    {
+     "value": "22D3EE",
+     "label": "Блакитний"
+    },
+    {
+     "value": "3DDC84",
+     "label": "Зелений"
+    },
+    {
+     "value": "FFFFFF",
+     "label": "Білий"
+    }
+   ]
+  },
+  {
+   "key": "height",
+   "label": "Висота хвилі, px",
+   "type": "int",
+   "arg": "--height",
+   "default": 320,
+   "min": 80,
+   "max": 900,
+   "step": 10
+  }
+ ],
+ "progress": {
+  "regex": "^\\s*(\\d+(?:\\.\\d+)?) / (\\d+(?:\\.\\d+)?) s",
+  "done": 1,
+  "total": 2
+ },
  "output": "mp4"
 }

@@ -106,6 +106,34 @@ class ExportIn(BaseModel):
     preview: float = 0
 
 
+class EpisodeIn(BaseModel):
+    name: str
+    files: list[str]
+    automation: dict[str, Any] | None = None
+    language: str | None = None
+    glossary: list[str] | None = None
+
+
+class AutomationIn(BaseModel):
+    path: str
+    changes: dict[str, Any]
+
+
+class DefaultsIn(BaseModel):
+    automation: dict[str, Any]
+
+
+class SettingsIn(BaseModel):
+    projects_dir: str | None = None
+
+
+class PreviewIn(BaseModel):
+    path: str
+    template: str
+    params: dict[str, Any] = {}
+    seconds: float = 6.0
+
+
 class EditIn(BaseModel):
     path: str
     op: str                                # status | adjust | cut | cut_words | delete | undo | redo
@@ -118,6 +146,7 @@ class EditIn(BaseModel):
     snap: str | bool | None = None
     i0: int | None = None
     i1: int | None = None
+    ranges: list[dict[str, Any]] | None = None
 
 
 class DecisionIn(BaseModel):
@@ -326,6 +355,8 @@ def create_app(token: str | None = None) -> FastAPI:
                     if body.source is None or body.i0 is None or body.i1 is None:
                         raise editing.EditError("cut_words needs source, i0 and i1")
                     info["id"] = editing.cut_words(p, body.path, body.source, body.i0, body.i1)
+                elif body.op == "cuts":
+                    info["ids"] = editing.add_cuts(p, body.path, body.ranges or [], snap=body.snap is not False)
                 elif body.op == "delete":
                     editing.delete(p, body.path, body.id or "")
                 elif body.op == "undo":
@@ -367,6 +398,98 @@ def create_app(token: str | None = None) -> FastAPI:
         return run_job("export", body.path, lambda progress: ops.export_project(
             body.path, body.out_dir, body.name, body.wav, body.mp3, body.chapters_txt, body.chapters_embed,
             video, body.preview, progress)).snapshot()
+
+    # ---- projects, automation, previews ------------------------------------------------------
+    def running_projects() -> set[str]:
+        return {str(Path(j.project).resolve()) for j in jobs.values()
+                if j.state in ("queued", "running") and j.kind in ("episode", "process") and j.project}
+
+    @app.get("/api/projects/stamp", dependencies=[Depends(auth)])
+    def project_stamp(path: str) -> dict:
+        """Changes by Claude (MCP) or another window show up in the app by polling this."""
+        f = Path(path)
+        return {"mtime": f.stat().st_mtime if f.is_file() else None}
+
+    @app.get("/api/projects/list", dependencies=[Depends(auth)])
+    def projects_list() -> dict:
+        from . import projects as P
+        return {"root": str(P.projects_root()), "projects": P.list_projects(running_projects())}
+
+    @app.post("/api/episodes", dependencies=[Depends(auth)])
+    def new_episode(body: EpisodeIn) -> dict:
+        from . import projects as P
+        missing = [f for f in body.files if not Path(f).is_file()]
+        if missing:
+            raise HTTPException(400, f"not found: {missing[:3]}")
+        if not body.files:
+            raise HTTPException(400, "no recordings")
+        target = str(P.new_project_path(body.name))
+        return run_job("episode", target, lambda progress: P.new_episode(
+            body.name, body.files, body.automation, body.language, body.glossary, target, progress)).snapshot()
+
+    @app.post("/api/projects/open", dependencies=[Depends(auth)])
+    def open_project(body: ProjectIn) -> dict:
+        return ops.summary(load(body.path))
+
+    @app.put("/api/projects/automation", dependencies=[Depends(auth)])
+    def put_automation(body: AutomationIn) -> dict:
+        from . import editing
+        p = load(body.path)
+        with edit_lock:
+            try:
+                editing.set_automation(p, body.path, body.changes)
+            except Exception as e:
+                raise HTTPException(400, str(e))
+        return timeline_payload(p, body.path)
+
+    @app.get("/api/automation/defaults", dependencies=[Depends(auth)])
+    def get_defaults() -> dict:
+        from .project import Automation
+        return Automation.model_validate(templates_mod.load_state().get("automation") or {}).model_dump()
+
+    @app.put("/api/automation/defaults", dependencies=[Depends(auth)])
+    def put_defaults(body: DefaultsIn) -> dict:
+        from .project import Automation
+        a = Automation.model_validate(body.automation).model_dump()
+        st = templates_mod.load_state()
+        st["automation"] = a
+        templates_mod._state_path().parent.mkdir(parents=True, exist_ok=True)
+        templates_mod._state_path().write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
+        return a
+
+    @app.get("/api/settings", dependencies=[Depends(auth)])
+    def get_settings() -> dict:
+        from . import projects as P
+        st = templates_mod.load_state()
+        return {"projects_dir": str(P.projects_root()), "home": str(templates_mod.home()),
+                "templates_dir": str(templates_mod.home() / "templates"), "mcp_last_seen": st.get("mcp_last_seen")}
+
+    @app.put("/api/settings", dependencies=[Depends(auth)])
+    def put_settings(body: SettingsIn) -> dict:
+        from . import projects as P
+        if body.projects_dir:
+            P.set_projects_root(body.projects_dir)
+        return get_settings()
+
+    preview_lock = threading.Lock()
+
+    @app.post("/api/templates/preview", dependencies=[Depends(auth)])
+    def template_preview(body: PreviewIn) -> dict:
+        load(body.path)
+        with preview_lock:
+            try:
+                r = ops.template_preview(body.path, body.template, body.params, max(2.0, min(15.0, body.seconds)))
+            except (KeyError, templates_mod.TemplateError) as e:
+                raise HTTPException(400, str(e).strip("'\""))
+        return {**r, "key": r["key"]}
+
+    @app.get("/api/files/cache", dependencies=[Depends(auth)])
+    def cache_file(path: str) -> FileResponse:
+        f = Path(path)
+        if not f.is_file() or not any(part.endswith(".holos-cache") for part in f.resolve().parts):
+            raise HTTPException(404, "not a cache file")
+        kind = {".mp4": "video/mp4", ".jpg": "image/jpeg", ".png": "image/png"}.get(f.suffix.lower(), "application/octet-stream")
+        return FileResponse(str(f), media_type=kind, headers={"Cache-Control": "max-age=3600"})
 
     @app.get("/api/jobs/{job_id}", dependencies=[Depends(auth)])
     def job(job_id: str) -> dict:

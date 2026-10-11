@@ -40,7 +40,20 @@ def _write_hist(path, h: dict) -> None:
 
 
 def _snap(p: Project, label: str) -> dict:
-    return {"label": label, "edits": json.loads(_edits_adapter.dump_json(p.edits))}
+    return {"label": label, "edits": json.loads(_edits_adapter.dump_json(p.edits)),
+            "automation": p.automation.model_dump(), "chain": [c.model_dump() for c in p.chain]}
+
+
+def _restore(p: Project, snap: dict) -> None:
+    from .project import Automation, ChainStep
+    p.edits = _edits_adapter.validate_python(snap["edits"])
+    if "automation" in snap:
+        p.automation = Automation.model_validate(snap["automation"])
+        p.analysis_settings.pause_max = p.automation.pause_max
+        p.analysis_settings.pause_target = p.automation.pause_target
+        p.analysis_settings.breath_db = p.automation.breath_db
+    if "chain" in snap:
+        p.chain = [ChainStep.model_validate(c) for c in snap["chain"]]
 
 
 def history_state(path) -> dict:
@@ -64,7 +77,7 @@ def undo(p: Project, path) -> str | None:
         return None
     snap = h["undo"].pop()
     h["redo"].append(_snap(p, snap["label"]))
-    p.edits = _edits_adapter.validate_python(snap["edits"])
+    _restore(p, snap)
     _write_hist(path, h)
     p.save(path)
     return snap["label"]
@@ -76,7 +89,7 @@ def redo(p: Project, path) -> str | None:
         return None
     snap = h["redo"].pop()
     h["undo"].append(_snap(p, snap["label"]))
-    p.edits = _edits_adapter.validate_python(snap["edits"])
+    _restore(p, snap)
     _write_hist(path, h)
     p.save(path)
     return snap["label"]
@@ -130,6 +143,7 @@ def set_status(p: Project, path, ids: list[str], status: str) -> None:
     for e in p.edits:
         if e.id in ids:
             e.status = status  # type: ignore[assignment]
+            e.touched = True
             found += 1
     if not found:
         raise EditError(f"edit not found: {ids}")
@@ -154,6 +168,7 @@ def adjust(p: Project, path, eid: str, start: float | None = None, end: float | 
     if t - s < 0.01:
         raise EditError("an edit must be at least 10 ms long")
     e.start, e.end = round(s, 4), round(t, 4)
+    e.touched = True
     if isinstance(e, CutEdit):
         e.before, e.text, e.after = _words_text(p, e.source, e.start, e.end)
     _commit(p, path, before)
@@ -173,9 +188,41 @@ def add_cut(p: Project, path, sid: str, start: float, end: float, snap: bool = T
     eid = _next_manual_id(p, sid)
     pre, text, post = _words_text(p, sid, a, b)
     p.edits.append(CutEdit(id=eid, source=sid, start=round(a, 4), end=round(b, 4), status="accepted", kind="manual",
-                           text=text, before=pre, after=post, reason="manual"))
+                           text=text, before=pre, after=post, reason="manual", touched=True))
     _commit(p, path, before)
     return eid
+
+
+def add_cuts(p: Project, path, ranges: list[dict], snap: bool = True) -> list[str]:
+    """Several cuts as ONE undo step (a range that spans recordings arrives split per recording)."""
+    before = _snap(p, "Вирізати діапазон")
+    ids = []
+    for r in ranges:
+        sid = r["source"]
+        src = p.source(sid)
+        a, b = sorted((float(r["start"]), float(r["end"])))
+        if snap:
+            sn = _snapper(p, path, sid)
+            a, b = sn.between(a - 0.03, a + 0.03), sn.between(b - 0.03, b + 0.03)
+        a, b = max(0.0, a), min(src.duration, b)
+        if b - a < 0.02:
+            continue
+        eid = _next_manual_id(p, sid)
+        pre, text, post = _words_text(p, sid, a, b)
+        p.edits.append(CutEdit(id=eid, source=sid, start=round(a, 4), end=round(b, 4), status="accepted",
+                               kind="manual", text=text, before=pre, after=post, reason="manual", touched=True))
+        ids.append(eid)
+    if not ids:
+        raise EditError("selection is too short to cut")
+    _commit(p, path, before)
+    return ids
+
+
+def set_automation(p: Project, path, changes: dict) -> None:
+    from . import automation
+    before = _snap(p, "Автоматика")
+    automation.update(p, dict(changes))
+    _commit(p, path, before)
 
 
 def cut_words(p: Project, path, sid: str, i0: int, i1: int) -> str:

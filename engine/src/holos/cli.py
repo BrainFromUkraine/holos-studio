@@ -50,13 +50,10 @@ def _cli_progress(stage: str, done: int, total: int, detail: str) -> None:
 
 
 @app.command()
-def analyze(project: Path,
-            suggest_only: Annotated[bool, typer.Option(help="Leave all detections as suggestions.")] = False) -> None:
-    """Measure every source and detect breaths, long pauses and gate drop-outs."""
+def analyze(project: Path) -> None:
+    """Measure every source and detect breaths, pauses and gate drop-outs (applied per the project's automation)."""
     from .ops import analyze_project
     p = Project.load(project)
-    if suggest_only:
-        p.auto_apply = [k for k in p.auto_apply if k not in ("gain", "pause", "fill")]
     r = analyze_project(p, project, _cli_progress)
     _echo(f"Analyzed {len(p.sources)} sources in {r['seconds']:.0f}s: breaths {r['gain']}, "
           f"pauses {r['pause']}, drop-outs {r['fill']}")
@@ -114,21 +111,17 @@ def transcript(project: Path,
         _echo(text)
 
 
-RECOMMENDED = {"retake", "repeat", "filler"}          # pre-filled "y" in the review sheet
-
-
 @app.command("suggest")
 def suggest_cmd(project: Path,
                 no_audio: Annotated[bool, typer.Option(help="Transcript only (skip the audio-based filler search).")] = False) -> None:
-    """Find retakes, repeats, fillers and unclear speech. Kinds in the project's auto_apply list are
-    accepted right away; the rest are left as questions."""
+    """Find retakes, repeats, fillers and unclear speech; the project's automation decides what is cut."""
     from .ops import suggest_project
     p = Project.load(project)
     if not p.transcript:
         raise typer.BadParameter("run `holos transcribe` first")
     r = suggest_project(p, project, use_audio=not no_audio)
     _echo(f"{r['total']} suggestions: " + (", ".join(f"{k} {v}" for k, v in sorted(r['by_kind'].items())) or "none")
-          + f" · {r['questions']} need your decision")
+          + f" · {r['applied']} applied")
 
 
 @app.command()
@@ -152,54 +145,6 @@ def serve(port: Annotated[int, typer.Option(help="Port on 127.0.0.1.")] = 8765,
         _echo(f"HOLOS_TOKEN={tok}")
     _echo(f"Holos engine API on http://127.0.0.1:{port}")
     uvicorn.run(create_app(tok), host="127.0.0.1", port=port, log_level="warning")
-
-
-def _fmt(t: float) -> str:
-    return f"{int(t // 60):02d}:{t % 60:04.1f}"
-
-
-@app.command()
-def review(project: Path,
-           out: Annotated[Path, typer.Option("--out", "-o", help="CSV file (opens in Excel).")] = Path("review.csv")) -> None:
-    """Write suggestions as a table: fill the `decision` column with y / n, then `holos review-apply`."""
-    import csv
-    from .edit import program_time, timeline_map
-    from .project import CutEdit
-    p = Project.load(project)
-    tm = timeline_map(p)
-    names = {s.id: Path(s.path).name for s in p.sources}
-    rows = [e for e in p.edits if isinstance(e, CutEdit) and e.kind]
-    rows.sort(key=lambda e: program_time(p, e.source, e.start, tm))
-    with open(out, "w", newline="", encoding="utf-8-sig") as f:      # BOM: Excel shows Cyrillic correctly
-        w = csv.writer(f)
-        w.writerow(["id", "decision", "kind", "episode_time", "file", "file_time", "seconds",
-                    "before", "cut", "after", "reason"])
-        for e in rows:
-            dec = {"accepted": "y", "rejected": "n"}.get(e.status, "y" if e.kind in RECOMMENDED else "")
-            w.writerow([e.id, dec, e.kind, _fmt(program_time(p, e.source, e.start, tm)), names[e.source],
-                        _fmt(e.start), round(e.end - e.start, 2), e.before, e.text, e.after, e.reason])
-    _echo(f"Wrote {out}: {len(rows)} rows. Set decision to y (cut) / n (keep), save as CSV, then run review-apply.")
-
-
-@app.command("review-apply")
-def review_apply(project: Path, sheet: Path) -> None:
-    """Read decisions from the review CSV: y = cut, n = keep, empty = undecided."""
-    import csv
-    p = Project.load(project)
-    yes, no = {"y", "yes", "так", "т", "+", "1", "x"}, {"n", "no", "ні", "н", "-", "0"}
-    with open(sheet, newline="", encoding="utf-8-sig") as f:
-        sample = f.read(4096); f.seek(0)
-        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")      # Excel may save with ';'
-        decided = {r["id"]: (r.get("decision") or "").strip().lower() for r in csv.DictReader(f, dialect=dialect)}
-    n_y = n_n = 0
-    for e in p.edits:
-        d = decided.get(e.id)
-        if d in yes:
-            e.status = "accepted"; n_y += 1
-        elif d in no:
-            e.status = "rejected"; n_n += 1
-    p.save(project)
-    _echo(f"cut {n_y}, keep {n_n}, undecided {len(decided) - n_y - n_n}")
 
 
 @app.command()

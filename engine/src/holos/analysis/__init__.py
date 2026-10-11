@@ -58,10 +58,11 @@ def analyze_source(x: np.ndarray, sr: int, sid: str, settings: AnalysisSettings,
         edits.append(GainEdit(id=f"{sid}-b{len(breath_spans)}", source=sid, start=round(s, 3), end=round(e, 3),
                               db=settings.breath_db, reason=f"breath (peak {rms[a:b].max():.1f} dBFS)"))
 
-    # --- long pauses -------------------------------------------------------
+    # --- pauses: every one from MIN_PAUSE is recorded; automation decides which get shortened ----
+    from ..automation import MIN_PAUSE
     k = 0
     for a, b in runs(~speech):
-        if a > a0 and b < b0 and (b - a) * HOP >= settings.pause_max:
+        if a > a0 and b < b0 and (b - a) * HOP >= min(MIN_PAUSE, settings.pause_max):
             k += 1
             edits.append(PauseEdit(id=f"{sid}-p{k}", source=sid, start=round(a * HOP, 3), end=round(b * HOP, 3),
                                    target=settings.pause_target, reason=f"pause {(b - a) * HOP:.2f}s"))

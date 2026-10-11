@@ -253,8 +253,11 @@ export default function EditorPage() {
   // ---- keyboard ---------------------------------------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      const el = e.target as HTMLElement;
+      const tag = el?.tagName;
+      const typing = tag === "TEXTAREA" || tag === "SELECT" || (tag === "INPUT" && !["range", "checkbox", "radio", "button"].includes((el as HTMLInputElement).type));
+      if (typing) return;
+      if (tag === "INPUT" && (e.code === "ArrowLeft" || e.code === "ArrowRight") && (el as HTMLInputElement).type === "range") return;
       const mod = e.ctrlKey || e.metaKey;
       const code = e.code;
       if (mod && code === "KeyZ") { e.preventDefault(); run({ op: e.shiftKey ? "redo" : "undo" }); }

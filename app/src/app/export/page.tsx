@@ -8,13 +8,15 @@ import {
   currentProject, engine, fmtClock, fmtDuration, parseTimecode,
   type ExportResult, type Job, type Summary, type TemplateInfo, type TemplateParam,
 } from "@/lib/engine";
+import { t, useLang } from "@/lib/i18n";
 
 type Row = { key: number; time: string; title: string; orig?: number };
-type Prev = { state: "idle" | "busy" | "ready" | "error"; video?: string; poster?: string; error?: string; started?: number };
+// need: a message composed at render time (so it follows the interface language)
+type Prev = { state: "idle" | "busy" | "ready" | "error"; video?: string; poster?: string; error?: string; need?: "modules" | "fill"; started?: number };
 
-const STAGES: Record<string, string> = {
-  render: "Зведення й обробка звуку", wav: "WAV", mp3: "MP3 з розділами", video: "Відео", mux: "Звук і розділи у відео", done: "Готово",
-};
+const stageLabel = (stage: string): string | undefined => ({
+  render: t("Mixing and processing audio"), wav: "WAV", mp3: t("MP3 with chapters"), video: t("Video"), mux: t("Adding audio and chapters to the video"), done: t("Done"),
+} as Record<string, string>)[stage];
 let rowKey = 0;
 const toRows = (s: Summary | null, hours: boolean): Row[] => (s?.chapters ?? []).map((c) => ({ key: ++rowKey, time: fmtClock(c.time, hours), title: c.title, orig: c.time }));
 
@@ -23,6 +25,7 @@ function missingRequired(t: TemplateInfo | null, params: Record<string, unknown>
 }
 
 export default function ExportPage() {
+  useLang();
   const { health } = useEngine();
   const [path, setPath] = useState<string | null>(null);
   const [s, setS] = useState<Summary | null>(null);
@@ -113,9 +116,9 @@ export default function ExportPage() {
   // live preview of the chosen template with the current parameters (debounced)
   useEffect(() => {
     if (!path || mode !== "video" || !tpl) return;
-    if (!tpl.ready) return setPrev({ state: "error", error: `Шаблону бракує модулів Python: ${tpl.missing.join(", ")}` });
+    if (!tpl.ready) return setPrev({ state: "error", need: "modules" });
     const miss = missingRequired(tpl, params);
-    if (miss.length) return setPrev({ state: "idle", error: `Заповніть: ${miss.map((p) => p.label).join(", ")} — і тут з'явиться прев'ю` });
+    if (miss.length) return setPrev({ state: "idle", need: "fill" });
     const req = ++prevReq.current;
     const timer = window.setTimeout(async () => {
       setPrev((p) => ({ ...p, state: "busy", started: Date.now() }));
@@ -159,7 +162,7 @@ export default function ExportPage() {
   };
   const askClaude = async () => {
     try {
-      await navigator.clipboard.writeText(`Зроби таймкоди (розділи) для випуску «${s?.name ?? ""}» у Holos Studio.`);
+      await navigator.clipboard.writeText(t("Make timecodes (chapters) for the episode “{name}” in Holos Studio.", { name: s?.name ?? "" }));
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2500);
     } catch {}
@@ -167,8 +170,8 @@ export default function ExportPage() {
 
   // ---- export -----------------------------------------------------------------------------------
   const video = mode === "video" && tpl;
-  const blocker = (video && !tpl!.ready && "Шаблону бракує модулів") || (video && missingRequired(tpl, params).length && `Заповніть: ${missingRequired(tpl, params).map((p) => p.label).join(", ")}`)
-    || (dirty && "Збережіть таймкоди") || (!wav && !mp3 && !video && "Нічого не вибрано") || null;
+  const blocker = (video && !tpl!.ready && t("Template is missing modules")) || (video && missingRequired(tpl, params).length && t("Fill in: {fields}", { fields: missingRequired(tpl, params).map((p) => p.label).join(", ") }))
+    || (dirty && t("Save the timecodes first")) || (!wav && !mp3 && !video && t("Nothing selected")) || null;
 
   const start = async () => {
     if (!path) return;
@@ -191,45 +194,48 @@ export default function ExportPage() {
   };
 
   if (!path) {
-    return <div className="main" style={{ padding: 20 }}><div className="banner">Проєкт не відкрито. <Link href="/">Виберіть або створіть проєкт</Link>.</div></div>;
+    return <div className="main" style={{ padding: 20 }}><div className="banner">{t("No project open.")} <Link href="/">{t("Choose or create a project")}</Link>.</div></div>;
   }
 
-  const name = s?.name ?? "епізод";
+  const name = s?.name ?? t("episode");
   const outDir = joinPath(dirname(path), "export");
   const files: [string, string, string][] = [];
   if (wav) files.push(["WAV", `${name}.wav`, "var(--text2)"]);
   if (mp3) files.push(["MP3", `${name}.mp3`, "var(--text2)"]);
   if (video) files.push(["MP4", `${name}.mp4`, "var(--loud)"]);
-  if (rows.length) files.push(["TXT", "таймкоди.txt", "var(--core)"]);
+  if (rows.length) files.push(["TXT", "timecodes.txt", "var(--core)"]);
   const warn = s?.chapter_warnings ?? [];
+  const prevMsg = prev.need === "modules" && tpl ? t("This template is missing Python modules: {modules}", { modules: tpl.missing.join(", ") })
+    : prev.need === "fill" && tpl ? t("Fill in {fields} and the preview will appear here", { fields: missingRequired(tpl, params).map((p) => p.label).join(", ") })
+    : prev.error;
 
   return (
     <div className="main">
-      <section aria-label="Що експортувати" style={{ flex: "0 1 400px", minWidth: 320, padding: "18px 20px", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 14 }}>
+      <section aria-label={t("What to export")} style={{ flex: "0 1 400px", minWidth: 320, padding: "18px 20px", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", gap: 14 }}>
         <EngineBanner />
-        <h2 className="section-title">Що зробити</h2>
-        <div role="radiogroup" aria-label="Що експортувати" className="seg">
+        <h2 className="section-title">{t("Output")}</h2>
+        <div role="radiogroup" aria-label={t("What to export")} className="seg">
           <button role="radio" aria-checked={mode === "audio"} style={{ minHeight: 62, textAlign: "left", padding: "8px 12px" }} disabled={running} onClick={() => setMode("audio")}>
-            <span style={{ fontSize: 14, fontWeight: 600 }}>Тільки аудіо</span><br /><span className="muted" style={{ fontSize: 11.5 }}>WAV + MP3 + таймкоди</span>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>{t("Audio only")}</span><br /><span className="muted" style={{ fontSize: 11.5 }}>{t("WAV + MP3 + timecodes")}</span>
           </button>
           <button role="radio" aria-checked={mode === "video"} style={{ minHeight: 62, textAlign: "left", padding: "8px 12px" }} disabled={running} onClick={() => setMode("video")}>
-            <span style={{ fontSize: 14, fontWeight: 600 }}>Аудіо + відео</span><br /><span className="muted" style={{ fontSize: 11.5 }}>+ MP4 для YouTube</span>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>{t("Audio + video")}</span><br /><span className="muted" style={{ fontSize: 11.5 }}>{t("+ MP4 for YouTube")}</span>
           </button>
         </div>
 
         {mode === "video" && (
           <>
-            <h2 className="section-title" style={{ marginTop: 4 }}>Вигляд відео</h2>
+            <h2 className="section-title" style={{ marginTop: 4 }}>{t("Video style")}</h2>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(110px, 1fr))", gap: 8 }}>
-              {tpls.map((t) => {
-                const on = t.id === tplId;
+              {tpls.map((tp) => {
+                const on = tp.id === tplId;
                 return (
-                  <button key={t.id} aria-pressed={on} disabled={running} onClick={() => { setTplId(t.id); setParams(t.initial); }}
+                  <button key={tp.id} aria-pressed={on} disabled={running} onClick={() => { setTplId(tp.id); setParams(tp.initial); }}
                     style={{ padding: 0, border: on ? "2px solid var(--core)" : "1px solid var(--border)", background: on ? "var(--sel-row)" : "var(--panel)", color: on ? "var(--bright)" : "var(--text2)", overflow: "hidden", textAlign: "left" }}>
-                    {posters[t.id]
-                      ? <img src={posters[t.id]} alt="" style={{ display: "block", width: "100%", aspectRatio: "16 / 9", objectFit: "cover" }} />
-                      : <span style={{ display: "flex", alignItems: "center", justifyContent: "center", aspectRatio: "16 / 9", background: "#000", fontSize: 10.5, color: "var(--muted)", padding: 4, textAlign: "center" }}>{t.ready ? "прев'ю…" : "бракує модулів"}</span>}
-                    <span style={{ display: "block", padding: "6px 6px 7px", fontSize: 11.5, lineHeight: 1.3 }}>{t.name}</span>
+                    {posters[tp.id]
+                      ? <img src={posters[tp.id]} alt="" style={{ display: "block", width: "100%", aspectRatio: "16 / 9", objectFit: "cover" }} />
+                      : <span style={{ display: "flex", alignItems: "center", justifyContent: "center", aspectRatio: "16 / 9", background: "#000", fontSize: 10.5, color: "var(--muted)", padding: 4, textAlign: "center" }}>{tp.ready ? t("preview…") : t("missing modules")}</span>}
+                    <span style={{ display: "block", padding: "6px 6px 7px", fontSize: 11.5, lineHeight: 1.3 }}>{tp.name}</span>
                   </button>
                 );
               })}
@@ -237,7 +243,7 @@ export default function ExportPage() {
             {tpl && (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {tpl.description && <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>{tpl.description}</div>}
-                {!tpl.ready && <div className="banner error" style={{ fontSize: 12 }}>Бракує модулів Python: <span className="mono">{tpl.missing.join(", ")}</span>{tpl.install ? <> — <span className="mono">{tpl.install}</span></> : null}</div>}
+                {!tpl.ready && <div className="banner error" style={{ fontSize: 12 }}>{t("Missing Python modules:")} <span className="mono">{tpl.missing.join(", ")}</span>{tpl.install ? <> — <span className="mono">{tpl.install}</span></> : null}</div>}
                 {tpl.params.map((p) => (
                   <ParamField key={p.key} p={p} value={params[p.key]} disabled={running} onChange={(v) => setParams((o) => ({ ...o, [p.key]: v }))} />
                 ))}
@@ -246,34 +252,34 @@ export default function ExportPage() {
           </>
         )}
 
-        <h2 className="section-title" style={{ marginTop: 4 }}>Формати</h2>
-        <label className="check"><input type="checkbox" checked={wav} disabled={running} onChange={(e) => setWav(e.target.checked)} />WAV <span className="muted" style={{ fontSize: 12 }}>24-bit · 48 kHz — майстер</span></label>
-        <label className="check"><input type="checkbox" checked={mp3} disabled={running} onChange={(e) => setMp3(e.target.checked)} />MP3 <span className="muted" style={{ fontSize: 12 }}>192 kbps, розділи всередині</span></label>
+        <h2 className="section-title" style={{ marginTop: 4 }}>{t("Formats")}</h2>
+        <label className="check"><input type="checkbox" checked={wav} disabled={running} onChange={(e) => setWav(e.target.checked)} />WAV <span className="muted" style={{ fontSize: 12 }}>{t("24-bit · 48 kHz — master")}</span></label>
+        <label className="check"><input type="checkbox" checked={mp3} disabled={running} onChange={(e) => setMp3(e.target.checked)} />MP3 <span className="muted" style={{ fontSize: 12 }}>{t("192 kbps, chapters embedded")}</span></label>
       </section>
 
-      <section aria-label="Прев'ю і таймкоди" style={{ flex: "999 1 560px", minWidth: 0, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+      <section aria-label={t("Preview and timecodes")} style={{ flex: "999 1 560px", minWidth: 0, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
         {err && <div className="banner error" role="alert" style={{ whiteSpace: "pre-wrap", fontSize: 12 }}>{err}</div>}
         {mode === "video" && (
           <>
             <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-              <h2 className="section-title">Живе прев&apos;ю</h2>
-              <span className="muted" style={{ fontSize: 12 }}>перші 6 с вашого епізоду через шаблон · змінюйте налаштування — перемальовується саме</span>
+              <h2 className="section-title">{t("Live preview")}</h2>
+              <span className="muted" style={{ fontSize: 12 }}>{t("the first 6 s of your episode through the template · change the settings and it redraws by itself")}</span>
             </div>
             <div style={{ position: "relative", background: "#000", border: "1px solid var(--border)", aspectRatio: "16 / 9", maxHeight: "48vh" }}>
               {prev.video && (
                 // eslint-disable-next-line jsx-a11y/media-has-caption
                 <video key={prev.video} src={prev.video} poster={prev.poster} autoPlay loop muted playsInline controls
-                  style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} aria-label="Прев'ю відео" />
+                  style={{ display: "block", width: "100%", height: "100%", objectFit: "contain" }} aria-label={t("Video preview")} />
               )}
               {prev.state !== "ready" && (
                 <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, background: prev.video ? "rgba(0,0,0,0.6)" : "transparent", padding: 20, textAlign: "center" }}>
                   {prev.state === "busy" ? (
                     <>
-                      <span style={{ color: "var(--bright)" }}>Рендерю прев&apos;ю…</span>
-                      <span className="mono muted" style={{ fontSize: 11 }} data-tick={tick}>{prev.started ? `${Math.round((Date.now() - prev.started) / 1000)} с` : ""} · перший раз ще зводиться звук епізоду</span>
+                      <span style={{ color: "var(--bright)" }}>{t("Rendering preview…")}</span>
+                      <span className="mono muted" style={{ fontSize: 11 }} data-tick={tick}>{prev.started ? t("{n} s", { n: Math.round((Date.now() - prev.started) / 1000) }) : ""} · {t("the first run also mixes the episode audio")}</span>
                     </>
                   ) : (
-                    <span className="muted" style={{ maxWidth: 420, lineHeight: 1.5 }}>{prev.error ?? "Виберіть вигляд відео ліворуч"}</span>
+                    <span className="muted" style={{ maxWidth: 420, lineHeight: 1.5 }}>{prevMsg ?? t("Choose a video style on the left")}</span>
                   )}
                 </div>
               )}
@@ -282,29 +288,29 @@ export default function ExportPage() {
         )}
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <h2 className="section-title">Таймкоди</h2>
-          <span className="muted" style={{ fontSize: 12 }}>{s?.chapters.some((c) => c.origin === "claude") ? "поставив Claude · можна правити" : "можна правити"}</span>
-          <button className="btn" style={{ marginLeft: "auto", height: 28, fontSize: 12 }} onClick={askClaude} title="Скопіювати запит і вставити в Claude Desktop">{copied ? "Скопійовано — вставте в Claude" : "Попросити Claude"}</button>
+          <h2 className="section-title">{t("Timecodes")}</h2>
+          <span className="muted" style={{ fontSize: 12 }}>{s?.chapters.some((c) => c.origin === "claude") ? t("set by Claude · editable") : t("editable")}</span>
+          <button className="btn" style={{ marginLeft: "auto", height: 28, fontSize: 12 }} onClick={askClaude} title={t("Copy a request to paste into Claude Desktop")}>{copied ? t("Copied — paste it into Claude") : t("Ask Claude")}</button>
           <button className="btn" style={{ height: 28, fontSize: 12 }} disabled={running} onClick={() => {
             const last = rows.length ? parseTimecode(rows[rows.length - 1].time) ?? 0 : -60;
             setRows((r) => [...r, { key: ++rowKey, time: fmtClock(Math.max(0, last + 60), hours), title: "" }]);
             setDirty(true);
-          }}>+ Таймкод</button>
+          }}>+ {t("Timecode")}</button>
         </div>
         {rows.length === 0 ? (
           <div className="card" style={{ padding: 14, lineHeight: 1.6, color: "var(--text2)" }}>
-            Таймкодів ще немає. Попросіть Claude: «Зроби таймкоди для {name}» — він прочитає епізод і поставить розділи, вони з&apos;являться тут самі. Або додайте вручну, чи маркерами в редакторі (M).
+            {t("No timecodes yet. Ask Claude: “Make timecodes for {name}” — it will read the episode and add chapters, and they’ll appear here by themselves. Or add them by hand, or with markers in the editor (M).", { name })}
           </div>
         ) : (
-          <ol aria-label="Таймкоди" style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", borderTop: "1px solid var(--border)", borderLeft: "1px solid var(--border)" }}>
+          <ol aria-label={t("Timecodes")} style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", borderTop: "1px solid var(--border)", borderLeft: "1px solid var(--border)" }}>
             {rows.map((r, i) => (
               <li key={r.key} style={{ display: "flex", borderRight: "1px solid var(--border)", borderBottom: "1px solid var(--border)" }}>
-                <input aria-label={`Час ${i + 1}`} className="input mono" value={i === 0 ? fmtClock(0, hours) : r.time} disabled={i === 0 || running}
+                <input aria-label={t("Time {n}", { n: i + 1 })} className="input mono" value={i === 0 ? fmtClock(0, hours) : r.time} disabled={i === 0 || running}
                   onChange={(e) => editRow(r.key, { time: e.target.value })}
                   style={{ width: 70, border: 0, borderRight: "1px solid var(--border)", background: "transparent", textAlign: "center", color: badRows.includes(r.key) ? "var(--cut)" : "var(--core)" }} />
-                <input aria-label={`Назва ${i + 1}`} className="input" value={r.title} disabled={running} placeholder="Назва розділу" onChange={(e) => editRow(r.key, { title: e.target.value })}
+                <input aria-label={t("Title {n}", { n: i + 1 })} className="input" value={r.title} disabled={running} placeholder={t("Chapter title")} onChange={(e) => editRow(r.key, { title: e.target.value })}
                   style={{ flex: "1 1 auto", minWidth: 0, border: 0, background: "transparent" }} />
-                <button className="iconbtn" style={{ border: 0, background: "transparent", height: 34 }} aria-label={`Видалити ${i + 1}`} disabled={running}
+                <button className="iconbtn" style={{ border: 0, background: "transparent", height: 34 }} aria-label={t("Delete {n}", { n: i + 1 })} disabled={running}
                   onClick={() => { setRows((rs) => rs.filter((x) => x.key !== r.key)); setDirty(true); }}>×</button>
               </li>
             ))}
@@ -312,17 +318,17 @@ export default function ExportPage() {
         )}
         {dirty && (
           <div style={{ display: "flex", gap: 6 }}>
-            <button className="btn primary" disabled={badRows.length > 0} onClick={saveChapters}>Зберегти таймкоди</button>
-            <button className="btn" onClick={() => { setRows(toRows(s, hours)); setDirty(false); }}>Скасувати</button>
-            {badRows.length > 0 && <span style={{ color: "var(--cut-text)", fontSize: 12, alignSelf: "center" }}>Час у форматі ХХ:СС</span>}
+            <button className="btn primary" disabled={badRows.length > 0} onClick={saveChapters}>{t("Save timecodes")}</button>
+            <button className="btn" onClick={() => { setRows(toRows(s, hours)); setDirty(false); }}>{t("Cancel")}</button>
+            {badRows.length > 0 && <span style={{ color: "var(--cut-text)", fontSize: 12, alignSelf: "center" }}>{t("Use the MM:SS time format")}</span>}
           </div>
         )}
         {!dirty && warn.length > 0 && <div className="banner" style={{ fontSize: 12 }}>{warn.map((w) => <div key={w}>{translateWarning(w)}</div>)}</div>}
-        <div className="muted" style={{ fontSize: 12 }}>Ці ж таймкоди підуть у файл для опису YouTube і всередину MP3 / MP4 — плеєри покажуть розділи самі.</div>
+        <div className="muted" style={{ fontSize: 12 }}>{t("The same timecodes go into a file for the YouTube description and inside the MP3 / MP4 — players show the chapters by themselves.")}</div>
       </section>
 
-      <aside aria-label="Куди і перевірка" className="panel" style={{ flex: "0 1 320px", minWidth: 280, borderLeft: "1px solid var(--border)", padding: "18px", display: "flex", flexDirection: "column", gap: 14 }}>
-        <h2 className="section-title">Буде у папці проєкту</h2>
+      <aside aria-label={t("Destination and checks")} className="panel" style={{ flex: "0 1 320px", minWidth: 280, borderLeft: "1px solid var(--border)", padding: "18px", display: "flex", flexDirection: "column", gap: 14 }}>
+        <h2 className="section-title">{t("Goes to the project folder")}</h2>
         <div className="mono muted" style={{ fontSize: 11, lineHeight: 1.5, wordBreak: "break-all" }}>{outDir}</div>
         <ul style={{ listStyle: "none", margin: 0, padding: 0, border: "1px solid var(--border)" }}>
           {files.map(([ext, n, c]) => (
@@ -334,29 +340,29 @@ export default function ExportPage() {
         </ul>
         <table className="table" style={{ fontSize: 12.5 }}>
           <tbody>
-            <Check k="Тривалість" v={fmtDuration(s?.edited_s)} ok />
-            <Check k="Гучність" v={measured?.integrated_lufs !== undefined ? `${measured.integrated_lufs.toFixed(1)} LUFS` : `${s?.settings.target_lufs ?? -16} LUFS (ціль)`} ok />
-            <Check k="True peak" v={measured?.true_peak_dbtp !== undefined ? `${measured.true_peak_dbtp.toFixed(1)} dBTP` : "−2.0 dBTP (стеля)"} ok={(measured?.true_peak_dbtp ?? -2) <= -1} />
-            <Check k="Таймкодів" v={String(s?.chapters.length ?? 0)} ok={warn.length === 0 && (s?.chapters.length ?? 0) > 0} />
+            <Check k={t("Duration")} v={fmtDuration(s?.edited_s)} ok />
+            <Check k={t("Loudness")} v={measured?.integrated_lufs !== undefined ? `${measured.integrated_lufs.toFixed(1)} LUFS` : t("{v} LUFS (target)", { v: s?.settings.target_lufs ?? -16 })} ok />
+            <Check k={t("True peak")} v={measured?.true_peak_dbtp !== undefined ? `${measured.true_peak_dbtp.toFixed(1)} dBTP` : t("−2.0 dBTP (ceiling)")} ok={(measured?.true_peak_dbtp ?? -2) <= -1} />
+            <Check k={t("Timecode count")} v={String(s?.chapters.length ?? 0)} ok={warn.length === 0 && (s?.chapters.length ?? 0) > 0} />
           </tbody>
         </table>
         {blocker && <div className="muted" style={{ fontSize: 12 }}>{blocker}</div>}
-        <button className="btn primary" style={{ height: 54, fontSize: 15 }} disabled={running || !!blocker || !health} onClick={start}>{running ? "Експортую…" : "Експортувати"}</button>
+        <button className="btn primary" style={{ height: 54, fontSize: 15 }} disabled={running || !!blocker || !health} onClick={start}>{running ? t("Exporting…") : t("Export")}</button>
         {job && running && <Progress job={job} />}
         {result && (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <h2 className="section-title">Готово за {fmtDuration(result.seconds)}</h2>
+            <h2 className="section-title">{t("Done in {time}", { time: fmtDuration(result.seconds) })}</h2>
             <ul style={{ listStyle: "none", margin: 0, padding: 0, border: "1px solid var(--border)" }}>
               {Object.entries(result.files).map(([k, f]) => (
                 <li key={k} style={{ display: "flex", gap: 8, alignItems: "center", padding: "6px 10px", borderBottom: "1px solid #1c1f1c" }}>
                   <span className="mono" style={{ flex: "1 1 auto", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 11 }} title={f}>{f.split(/[\\/]/).pop()}</span>
-                  {isDesktop() && <button className="btn" style={{ height: 26, fontSize: 11, padding: "0 8px" }} onClick={() => revealFile(f)}>Показати</button>}
+                  {isDesktop() && <button className="btn" style={{ height: 26, fontSize: 11, padding: "0 8px" }} onClick={() => revealFile(f)}>{t("Show")}</button>}
                 </li>
               ))}
             </ul>
           </div>
         )}
-        <div className="muted" style={{ fontSize: 12, lineHeight: 1.55, marginTop: "auto" }}>Після рендеру гучність і піки вимірюються ще раз, звіт кладеться поруч.</div>
+        <div className="muted" style={{ fontSize: 12, lineHeight: 1.55, marginTop: "auto" }}>{t("After rendering, loudness and peaks are measured again and a report is saved alongside.")}</div>
       </aside>
     </div>
   );
@@ -373,11 +379,12 @@ function Check({ k, v, ok }: { k: string; v: string; ok: boolean }) {
 }
 
 function Progress({ job }: { job: Job }) {
+  useLang();
   const pct = job.total > 0 && job.done > 0 ? Math.min(100, (100 * job.done) / job.total) : null;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }} aria-live="polite">
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-        <span>{STAGES[job.stage] ?? job.stage ?? "Черга"}</span>
+        <span>{stageLabel(job.stage) ?? job.stage ?? t("Queued")}</span>
         <span className="mono muted">{job.stage === "video" && pct !== null ? `${fmtClock(job.done)} / ${fmtClock(job.total)} · ` : ""}{fmtClock(job.elapsed)}</span>
       </div>
       <div className="bar"><i style={{ width: pct === null ? "100%" : `${pct}%`, opacity: pct === null ? 0.35 : 1 }} /></div>
@@ -386,6 +393,7 @@ function Progress({ job }: { job: Job }) {
 }
 
 function ParamField({ p, value, onChange, disabled }: { p: TemplateParam; value: unknown; onChange: (v: unknown) => void; disabled: boolean }) {
+  useLang();
   const label = <span>{p.label}{p.required && <span style={{ color: "var(--question)" }}> *</span>}</span>;
   const help = p.help ? <span className="muted" style={{ fontSize: 11 }}>{p.help}</span> : null;
   if (p.type === "bool") {
@@ -407,8 +415,8 @@ function ParamField({ p, value, onChange, disabled }: { p: TemplateParam; value:
     return (
       <div className="field">{label}
         <span style={{ display: "flex" }}>
-          <input className="input mono" style={{ flex: "1 1 auto", minWidth: 0, fontSize: 11, borderRight: isDesktop() ? 0 : undefined }} value={v} disabled={disabled} placeholder="Шлях до файлу" onChange={(e) => onChange(e.target.value)} />
-          {isDesktop() && <button className="btn" style={{ height: 34 }} aria-label={`Вибрати: ${p.label}`} disabled={disabled} onClick={async () => { const f = await pickFile(p.filters, v || undefined); if (f) onChange(f); }}>…</button>}
+          <input className="input mono" style={{ flex: "1 1 auto", minWidth: 0, fontSize: 11, borderRight: isDesktop() ? 0 : undefined }} value={v} disabled={disabled} placeholder={t("File path")} onChange={(e) => onChange(e.target.value)} />
+          {isDesktop() && <button className="btn" style={{ height: 34 }} aria-label={t("Choose: {label}", { label: p.label })} disabled={disabled} onClick={async () => { const f = await pickFile(p.filters, v || undefined); if (f) onChange(f); }}>…</button>}
         </span>{help}
       </div>
     );
@@ -431,8 +439,8 @@ function ParamField({ p, value, onChange, disabled }: { p: TemplateParam; value:
 
 function translateWarning(w: string): string {
   const few = w.match(/at least (\d+)$/);
-  if (few) return `YouTube показує розділи, лише коли їх щонайменше ${few[1]}.`;
+  if (few) return t("YouTube shows chapters only when there are at least {n}.", { n: few[1] });
   const short = w.match(/^chapter '(.*)' is shorter than (\d+) s$/);
-  if (short) return `Розділ «${short[1]}» коротший за ${short[2]} с — YouTube його не покаже.`;
+  if (short) return t("Chapter “{title}” is shorter than {n} s — YouTube won’t show it.", { title: short[1], n: short[2] });
   return w;
 }

@@ -376,7 +376,8 @@ export function TimelineCanvas(props: Props) {
     for (let i = markers.length - 1; i >= 0; i--) {
       const m = markers[i];
       const x0 = sx(m.time);
-      const w = ctx.measureText(`${fmtShort(m.time)} ${m.title}`).width + 22;
+      const next = markers[i + 1] ? sx(markers[i + 1].time) - 3 : Infinity;
+      const w = Math.max(8, Math.min(ctx.measureText(`${fmtShort(m.time)} ${m.title}`).width + 22, next - x0));
       if (x >= x0 - 3 && x <= x0 + w) return i;
     }
     return -1;
@@ -404,8 +405,6 @@ export function TimelineCanvas(props: Props) {
       if (i >= 0) {
         onSelect({ kind: "marker", i });
         setDrag({ kind: "marker", i, x0: x, T: markers[i].time, moved: false });
-      } else if (e.detail >= 2) {
-        onMarkerAdd(T);
       } else {
         onSeek(T);
       }
@@ -427,7 +426,7 @@ export function TimelineCanvas(props: Props) {
         const k = sorted.findIndex((s) => s > T);
         const A = k <= 0 ? null : sorted[k - 1];
         const B = k < 0 ? null : sorted[k];
-        if (A !== null && B !== null && e.detail >= 1) {
+        if (A !== null && B !== null) {
           setDrag({ kind: "range", A: T, x0: x, moved: false, lane });
           onSelect({ kind: "range", A, B });
           return;
@@ -496,7 +495,14 @@ export function TimelineCanvas(props: Props) {
   return (
     <div style={{ position: "relative", height: L.total }}>
       <canvas ref={cv} role="img" aria-label="Таймлайн епізоду" style={{ display: "block", width, height: L.total, cursor, touchAction: "none" }}
-        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} />
+        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}
+        onDoubleClick={(e) => {
+          // pointer events carry no click count, so double-click is handled here: new marker on the markers lane
+          const r = cv.current!.getBoundingClientRect();
+          const x = e.clientX - r.left;
+          const y = e.clientY - r.top;
+          if (laneAt(y) === "markers" && markerAt(x) < 0) onMarkerAdd(clampT(xs(x)));
+        }} />
       {ph >= 0 && ph <= width && (
         <>
           <div aria-hidden="true" style={{ position: "absolute", top: 0, bottom: 0, left: Math.round(ph), width: 1, background: "#F4F6F4", pointerEvents: "none" }} />

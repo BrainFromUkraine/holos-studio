@@ -79,7 +79,7 @@ export const editor: Record<string, string | string[]> = {
   "Done automatically:": "Зроблено автоматично:",
   repeats: "повтори",
   retakes: "дублі",
-  "uh/um": "еее/ммм",
+  "fillers": "еее/ммм",
   pauses: "паузи",
   breaths: "вдихи",
   "drop-outs": "провали фону",

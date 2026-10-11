@@ -33,11 +33,11 @@ export const exportArea: Record<string, string | string[]> = {
   "Preview and timecodes": "Прев'ю і таймкоди",
   "Live preview": "Живе прев'ю",
   "the first 6 s of your episode through the template · change the settings and it redraws by itself":
-    "перші 6 с вашого епізоду через шаблон · змінюйте налаштування — перемальовується саме",
+    "перші 6 с вашого випуску через шаблон · змінюйте налаштування — перемальовується саме",
   "Video preview": "Прев'ю відео",
   "Rendering preview…": "Рендерю прев'ю…",
   "{n} s": "{n} с",
-  "the first run also mixes the episode audio": "перший раз ще зводиться звук епізоду",
+  "the first run also mixes the episode audio": "перший раз ще зводиться звук випуску",
   "Choose a video style on the left": "Виберіть вигляд відео ліворуч",
   "This template is missing Python modules: {modules}": "Шаблону бракує модулів Python: {modules}",
   "Fill in {fields} and the preview will appear here": "Заповніть: {fields} — і тут з'явиться прев'ю",
@@ -52,8 +52,8 @@ export const exportArea: Record<string, string | string[]> = {
   "Make timecodes (chapters) for the episode “{name}” in Holos Studio.": "Зроби таймкоди (розділи) для випуску «{name}» у Holos Studio.",
   "Timecode": "Таймкод",
   "No timecodes yet. Ask Claude: “Make timecodes for {name}” — it will read the episode and add chapters, and they’ll appear here by themselves. Or add them by hand, or with markers in the editor (M).":
-    "Таймкодів ще немає. Попросіть Claude: «Зроби таймкоди для {name}» — він прочитає епізод і поставить розділи, вони з'являться тут самі. Або додайте вручну, чи маркерами в редакторі (M).",
-  "episode": "епізод",
+    "Таймкодів ще немає. Попросіть Claude: «Зроби таймкоди для {name}» — він прочитає випуск і поставить розділи, вони з'являться тут самі. Або додайте вручну, чи маркерами в редакторі (M).",
+  "episode": "випуск",
   "Time {n}": "Час {n}",
   "Title {n}": "Назва {n}",
   "Chapter title": "Назва розділу",
@@ -80,7 +80,7 @@ export const exportArea: Record<string, string | string[]> = {
   "Save the timecodes first": "Збережіть таймкоди",
   "Nothing selected": "Нічого не вибрано",
   "Exporting…": "Експортую…",
-  "Export": "Експортувати",
+  "Export episode": "Експортувати",
   "Done in {time}": "Готово за {time}",
   "Show": "Показати",
   "After rendering, loudness and peaks are measured again and a report is saved alongside.":

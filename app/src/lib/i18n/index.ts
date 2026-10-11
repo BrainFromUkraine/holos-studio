@@ -31,7 +31,15 @@ function readStored(): Lang {
     return "en";
   }
 }
-if (typeof window !== "undefined") current = readStored();
+// The stored language is applied after hydration (first subscriber), never at module load: the static HTML is
+// English, and the first client render must match it — otherwise React reports a hydration mismatch.
+let applied = false;
+function applyStored(): void {
+  if (applied || typeof window === "undefined") return;
+  applied = true;
+  const stored = readStored();
+  if (stored !== current) queueMicrotask(() => setLang(stored));
+}
 
 export function getLang(): Lang {
   return current;
@@ -59,6 +67,7 @@ export function useLang(): Lang {
   return useSyncExternalStore(
     (cb) => {
       listeners.add(cb);
+      applyStored();
       return () => listeners.delete(cb);
     },
     () => current,

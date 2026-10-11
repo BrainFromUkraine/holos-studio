@@ -355,7 +355,7 @@ export default function EditorPage() {
       {/* ---- what was done automatically ---- */}
       <div style={{ flex: "0 0 32px", display: "flex", alignItems: "center", gap: 18, padding: "0 14px", background: "#0d0f0d", borderBottom: "1px solid var(--border)", fontSize: 12, color: "var(--text2)", whiteSpace: "nowrap", overflow: "hidden" }}>
         <span className="muted">{t("Done automatically:")}</span>
-        {([["repeat", "repeats", "var(--cut)"], ["retake", "retakes", "var(--cut)"], ["filler", "uh/um", "var(--cut)"], ["pause", "pauses", "#6a706a"], ["gain", "breaths", "var(--breath)"], ["fill", "drop-outs", "var(--dim)"]] as [string, string, string][]).map(([k, l, c]) => (
+        {([["repeat", "repeats", "var(--cut)"], ["retake", "retakes", "var(--cut)"], ["filler", "fillers", "var(--cut)"], ["pause", "pauses", "#6a706a"], ["gain", "breaths", "var(--breath)"], ["fill", "drop-outs", "var(--dim)"]] as [string, string, string][]).map(([k, l, c]) => (
           <span key={k}><i style={{ display: "inline-block", width: 8, height: 8, background: c, marginRight: 6 }} />{t(l)} {counts[k === "gain" ? "breath" : k] ?? 0}</span>
         ))}
         <span><i style={{ display: "inline-block", width: 8, height: 8, background: auto?.clicks === "off" ? "var(--dim)" : "var(--loud)", marginRight: 6 }} />{auto?.clicks === "off" ? t("mouth clicks off") : t("mouth clicks removed")}</span>

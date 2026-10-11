@@ -10,7 +10,7 @@ from typing import Callable
 
 import numpy as np
 import pyloudnorm as pyln
-from scipy.signal import istft, stft
+from scipy.signal import butter, istft, sosfiltfilt, stft
 
 from ..io import ffmpeg_filter
 from ..project import ChainStep
@@ -146,6 +146,73 @@ def loudness(x: np.ndarray, p: dict, c: Context) -> np.ndarray:
     if c.log is not None:
         c.log["loudness"] = {"pre_lufs": round(lu, 2), "gain_db": round(target - lu, 2)}
     return y
+
+
+# mouth clicks / saliva: strength → (dB above the 30 ms median, dB above the loudest 2–12 ms on both sides, max ms)
+MOUTHCLICK_STRENGTH = {"light": (20.0, 10.0, 2.0), "normal": (16.0, 7.0, 3.0), "strong": (12.0, 5.0, 4.0)}
+_CLICK_HOP = 0.00025                                # analysis frame: 0.25 ms
+
+
+def find_mouth_clicks(x: np.ndarray, sr: int, strength: str = "normal") -> list[tuple[int, int]]:
+    """Mouth clicks are isolated ticks above 3 kHz: 0.5–3 ms long, far louder than the band's median level
+    around them AND than the few milliseconds right before and after. Consonants and sibilants are longer
+    and not isolated, so they are left alone. Returns sample ranges."""
+    from scipy.ndimage import median_filter
+    over_med, over_side, max_ms = MOUTHCLICK_STRENGTH.get(strength, MOUTHCLICK_STRENGTH["normal"])
+    sos = butter(4, 3000, btype="highpass", fs=sr, output="sos")
+    h = sosfiltfilt(sos, x)
+    hop = max(1, int(_CLICK_HOP * sr))
+    n = len(h) // hop
+    if n < 200:
+        return []
+    E = (h[: n * hop] ** 2).reshape(n, hop).mean(1)
+    short = np.convolve(E, np.ones(2) / 2, mode="same")                     # 0.5 ms
+    med = median_filter(E, size=int(0.030 / _CLICK_HOP) | 1, mode="nearest") + 1e-14
+    k0 = int(0.002 / _CLICK_HOP)
+    idx = np.arange(n)
+    # isolation: louder than the LOUDEST moment 2–12 ms on each side — glottal pulses of voiced speech
+    # repeat every 4–10 ms with similar height, so they never pass; a lone mouth click does
+    from scipy.ndimage import maximum_filter1d
+    L = int(0.010 / _CLICK_HOP)
+    mx = maximum_filter1d(short, size=L, mode="nearest")
+    before = mx[np.clip(idx - k0 - L // 2, 0, n - 1)] + 1e-14
+    after = mx[np.clip(idx + k0 + L // 2, 0, n - 1)] + 1e-14
+    floor = 10 ** (-60 / 10)
+    hit = (short > med * 10 ** (over_med / 10)) & (short > before * 10 ** (over_side / 10)) \
+        & (short > after * 10 ** (over_side / 10)) & (short > floor)
+    if not hit.any():
+        return []
+    d = np.diff(np.concatenate([[0], hit.astype(np.int8), [0]]))
+    out: list[tuple[int, int]] = []
+    for a, b in zip(np.where(d == 1)[0], np.where(d == -1)[0]):
+        if out and a - out[-1][1] <= 4:                # merge ticks closer than 1 ms
+            out[-1] = (out[-1][0], b)
+        else:
+            out.append((a, b))
+    max_len = max_ms / 1000 / _CLICK_HOP
+    return [(a * hop, b * hop) for a, b in out if b - a <= max_len]
+
+
+@numpy_module("mouthclick")
+def mouthclick(x: np.ndarray, p: dict, c: Context) -> np.ndarray:
+    """Remove mouth clicks by fading out only their high band (> 3 kHz) — the voice underneath stays,
+    nothing is cut, the length does not change."""
+    strength = p.get("strength", "normal")
+    clicks = find_mouth_clicks(x, c.sr, strength)
+    if clicks:
+        sos = butter(4, 3000, btype="highpass", fs=c.sr, output="sos")
+        y = x.copy()
+        pad = int(0.0008 * c.sr)
+        for a, b in clicks:
+            a0, b0 = max(0, a - pad), min(len(x), b + pad)
+            seg = x[max(0, a0 - 256):min(len(x), b0 + 256)]
+            hp = sosfiltfilt(sos, seg)[a0 - max(0, a0 - 256):][: b0 - a0]
+            w = np.hanning(b0 - a0 + 2)[1:-1] if b0 - a0 > 2 else np.ones(b0 - a0)
+            y[a0:b0] -= hp * w
+        x = y
+    if c.log is not None:
+        c.log["mouthclick"] = {"strength": strength, "clicks": len(clicks)}
+    return x
 
 
 # ---------------------------------------------------------------- runner

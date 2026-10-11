@@ -173,3 +173,44 @@ def transcript_text(p: Project, max_words: int = 40) -> str:
 
 __all__ = ["episode_words", "episode_length", "chapter_time", "anchor", "set_chapters", "resolved",
            "check_youtube", "youtube_text", "ffmetadata", "transcript_text", "join_words"]
+
+
+def episode_to_source(p: Project, T: float) -> tuple[str, float]:
+    """Exact inverse of the episode mapping: time in the finished episode → (recording, time in it)."""
+    tm = timeline_map(p)
+    xf = p.timeline_settings.crossfade
+    best = None
+    for clip in p.timeline:
+        sid = clip.source
+        if sid not in tm:
+            continue
+        start, a0, b0, rem = tm[sid]
+        if T < start:
+            break
+        cur = a0
+        for cs, ce in list(rem) + [(b0, b0)]:
+            seg_start = start + map_time(cur, a0, rem, xf)
+            seg_end = start + map_time(cs, a0, rem, xf) if cs > cur else seg_start
+            if T <= seg_end:
+                return sid, round(cur + max(0.0, T - seg_start), 4)
+            cur = ce
+        best = (sid, b0)
+    if best:
+        return best
+    first = p.timeline[0].source
+    return first, tm[first][1]
+
+
+def episode_range_to_sources(p: Project, A: float, B: float) -> list[dict]:
+    """An episode-time range as per-recording ranges (a range can span a join between recordings)."""
+    A, B = min(A, B), max(A, B)
+    sa, ta = episode_to_source(p, A)
+    sb, tb = episode_to_source(p, B)
+    order = [c.source for c in p.timeline]
+    if sa == sb:
+        return [{"source": sa, "start": ta, "end": tb}]
+    out = [{"source": sa, "start": ta, "end": p.source(sa).duration}]
+    for sid in order[order.index(sa) + 1:order.index(sb)]:
+        out.append({"source": sid, "start": 0.0, "end": p.source(sid).duration})
+    out.append({"source": sb, "start": 0.0, "end": tb})
+    return out

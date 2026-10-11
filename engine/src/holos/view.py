@@ -89,10 +89,23 @@ def timeline(p: Project, path: str | Path | None = None) -> dict:
             d["episode_time"] = round(program_time(p, e.source, e.start, tm), 3)
         edits.append(d)
     words = {sid: [[w.w, round(w.start, 3), round(w.end, 3), round(w.p, 3)] for w in ws] for sid, ws in p.transcript.items()}
+    splices = []
+    for clip in p.timeline:
+        if clip.source not in tm:
+            continue
+        start, a0, b0, rem = tm[clip.source]
+        for cs, ce in rem:
+            ids = [e.id for e in p.edits if e.source == clip.source and e.status == "accepted"
+                   and e.type in ("cut", "pause") and e.start < ce and e.end > cs]
+            kinds = sorted({(getattr(e, "kind", "") or e.type) for e in p.edits if e.id in ids})
+            splices.append({"source": clip.source, "start": round(cs, 4), "end": round(ce, 4),
+                            "removed": round(ce - cs, 3), "edits": ids, "kinds": kinds,
+                            "episode_time": round(program_time(p, clip.source, cs, tm), 3)})
     out = {"name": p.name, "sample_rate": p.sample_rate, "crossfade": xf, "gap_view": GAP_VIEW,
            "original_length": round(max(0.0, off - GAP_VIEW), 3),
            "length": round(episode_length(p), 3) if ready else None,
-           "sources": sources, "edits": edits, "words": words, "chapters": resolved(p) if ready else [],
+           "sources": sources, "edits": edits, "words": words, "splices": splices,
+           "automation": p.automation.model_dump(), "chapters": resolved(p) if ready else [],
            "target_lufs": next((c.params.get("target_lufs") for c in p.chain if c.module == "loudness"), None),
            "chain": [{"module": c.module, "enabled": c.enabled, "params": c.params} for c in p.chain],
            "measured": None}

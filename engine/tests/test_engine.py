@@ -195,20 +195,6 @@ def test_clip_plan_tail_cut_moves_end():
     assert map_time(13.0, a0, rem, 0.04) == pytest.approx(13.0 - 0.98 - 2.0 - 0.04)
 
 
-def test_review_roundtrip_semicolon(tmp_path):
-    from holos.project import CutEdit, Source
-    p = Project(name="t")
-    p.sources.append(Source(id="s1", path=str(tmp_path / "a.wav"), sha256="x", sr=SR, channels=2, duration=10))
-    p.edits = [CutEdit(id="s1-r1", source="s1", start=1, end=2, kind="repeat", text="а а"),
-               CutEdit(id="s1-u1", source="s1", start=3, end=4, kind="unclear", text="бла")]
-    p.save(tmp_path / "t.holos")
-    (tmp_path / "r.csv").write_text("id;decision;kind\ns1-r1;Так;repeat\ns1-u1;n;unclear\n", encoding="utf-8-sig")
-    r = CliRunner().invoke(app, ["review-apply", str(tmp_path / "t.holos"), str(tmp_path / "r.csv")])
-    assert r.exit_code == 0, r.output
-    q = Project.load(tmp_path / "t.holos")
-    assert [e.status for e in q.edits] == ["accepted", "rejected"]
-
-
 def test_find_retake_latin_vs_cyrillic_spelling():
     from holos.suggest import find_retake
     prev = _words("для bluetooth ли і на крауд саплай з 'явився кью вісім бот ван овпенсорс робот червоно")

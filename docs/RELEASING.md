@@ -65,15 +65,13 @@ update-banner text (Ukrainian part, shown under **Що нового**) and the t
 
    This updates `app/package.json` (+ lock), `app/src-tauri/tauri.conf.json`, `app/src-tauri/Cargo.toml`
    (+ `Cargo.lock`), `engine/pyproject.toml` (+ `uv.lock`) and `engine/src/holos/__init__.py`.
-4. Commit, tag, push the tag:
+4. Commit and push to `main`, then publish — either way works:
 
-   ```bash
-   git commit -am "release: v0.3.0-beta.2"
-   git tag v0.3.0-beta.2
-   git push origin main v0.3.0-beta.2
-   ```
+   - **Button (usual):** Actions → **Release** → *Run workflow* on `main` with **publish** ticked
+     (or `gh workflow run release.yml --ref main -f publish=true`). The workflow creates the tag itself.
+   - **Tag:** `git tag v0.3.0-beta.2 && git push origin v0.3.0-beta.2`.
 
-5. The **Release** workflow (`.github/workflows/release.yml`) runs on the tag (~20 min on `windows-latest`):
+5. The **Release** workflow (`.github/workflows/release.yml`) (~20 min on `windows-latest`):
    downloads uv / FFmpeg (SHA-256 checked), stages the engine source (`scripts/stage-engine.mjs`), builds the app,
    signs the update and publishes a GitHub Release (a pre-release for `-beta.N`) with the changelog text and:
    - `Holos.Studio_<version>_x64-setup.exe` — the installer (also the update payload),
@@ -84,7 +82,7 @@ update-banner text (Ukrainian part, shown under **Що нового**) and the t
    installed apps poll (`plugins.updater.endpoints` in `tauri.conf.json`). GitHub's "latest release" ignores
    pre-releases, so the feed has its own fixed address. Do not delete that release.
 
-   The workflow refuses to run if the tag and `tauri.conf.json` disagree, if `CHANGELOG.md` has no section for the
+   The workflow refuses to run if the tag and `tauri.conf.json` disagree, if that version is already released, if `CHANGELOG.md` has no section for the
    version, or if the signing key secret is missing.
 
 ### Test build without a release

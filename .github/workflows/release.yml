@@ -2,7 +2,9 @@
 #
 # * Push a tag vX.Y.Z or vX.Y.Z-beta.N → build, sign the update, publish a GitHub Release (a beta is marked
 #   Pre-release) with the text from CHANGELOG.md, and point the update feed (release "updater") at it.
-# * Run manually       → build only; the installer is uploaded as a workflow artifact (no release).
+# * Run manually with "publish" ticked (main only) → the same, for the version in tauri.conf.json; the workflow
+#   creates the tag vX.Y.Z itself. This is the usual way to release.
+# * Run manually without "publish" → build only; the installer is uploaded as a workflow artifact (no release).
 #
 # Secrets: TAURI_SIGNING_PRIVATE_KEY (+ TAURI_SIGNING_PRIVATE_KEY_PASSWORD) — see docs/RELEASING.md.
 
@@ -12,6 +14,11 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish a release for the version in tauri.conf.json (creates the tag; main only)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -27,7 +34,8 @@ jobs:
     env:
       TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
       TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      # true = publish a release (tag push, or a manual run with "publish" ticked)
+      PUBLISH: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.publish == true }}
     steps:
       - uses: actions/checkout@v5
 
@@ -43,22 +51,36 @@ jobs:
         with:
           workspaces: "app/src-tauri -> target"
 
-      - name: Version must match the tag
-        if: env.IS_TAG == 'true'
+      - name: Release tag
+        id: tag
+        if: env.PUBLISH == 'true'
         shell: bash
         run: |
           v=$(node -p "require('./app/src-tauri/tauri.conf.json').version")
-          if [ "v$v" != "${GITHUB_REF_NAME}" ]; then
-            echo "::error::tauri.conf.json version is $v but the tag is ${GITHUB_REF_NAME}. Run scripts/bump-version.mjs first."
-            exit 1
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            if [ "v$v" != "${GITHUB_REF_NAME}" ]; then
+              echo "::error::tauri.conf.json version is $v but the tag is ${GITHUB_REF_NAME}. Run scripts/bump-version.mjs first."
+              exit 1
+            fi
+          else
+            if [ "$GITHUB_REF_NAME" != "main" ]; then
+              echo "::error::Publish only from main (this run is on ${GITHUB_REF_NAME})."
+              exit 1
+            fi
+            if git ls-remote --exit-code --tags origin "refs/tags/v$v" > /dev/null; then
+              echo "::error::v$v is already released. Bump the version (scripts/bump-version.mjs) for a new release."
+              exit 1
+            fi
           fi
+          echo "name=v$v" >> "$GITHUB_OUTPUT"
+          echo "Releasing v$v from ${GITHUB_SHA}"
 
       - name: Release notes from CHANGELOG.md
         id: notes
-        if: env.IS_TAG == 'true'
+        if: env.PUBLISH == 'true'
         shell: bash
         run: |
-          v="${GITHUB_REF_NAME#v}"
+          v="${{ steps.tag.outputs.name }}"; v="${v#v}"
           node scripts/release-notes.mjs "$v" release > "$RUNNER_TEMP/body.md"
           node scripts/release-notes.mjs "$v" app > "$RUNNER_TEMP/app-notes.md"
           {
@@ -87,7 +109,7 @@ jobs:
           if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
             echo "Signing key present: update artifacts will be signed."
             echo "config=" >> "$GITHUB_OUTPUT"
-          elif [ "$IS_TAG" = "true" ]; then
+          elif [ "$PUBLISH" = "true" ]; then
             echo "::error::TAURI_SIGNING_PRIVATE_KEY secret is missing — a release without signed updates would break auto-update."
             exit 1
           else
@@ -99,13 +121,14 @@ jobs:
 
       # ---- tag: build + GitHub Release + latest.json for the updater --------------------------------------------
       - name: Build and publish release
-        if: env.IS_TAG == 'true'
+        if: env.PUBLISH == 'true'
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: app
-          tagName: ${{ github.ref_name }}
+          tagName: ${{ steps.tag.outputs.name }}
+          releaseCommitish: ${{ github.sha }}
           releaseName: ${{ steps.notes.outputs.title }}
           releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
@@ -117,14 +140,14 @@ jobs:
       # "latest release" skips pre-releases, so the feed lives in its own release and is replaced on every tag;
       # its notes are the Ukrainian part of the changelog (what the update banner shows).
       - name: Publish the update feed
-        if: env.IS_TAG == 'true'
+        if: env.PUBLISH == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP"
-          gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -p latest.json --clobber
+          gh release download "${{ steps.tag.outputs.name }}" -R "$GITHUB_REPOSITORY" -p latest.json --clobber
           node -e '
             const fs = require("fs");
             const j = JSON.parse(fs.readFileSync("latest.json", "utf8"));
@@ -141,7 +164,7 @@ jobs:
 
       # ---- manual run: build only, installer as a workflow artifact -------------------------------------------
       - name: Build installer
-        if: env.IS_TAG != 'true'
+        if: env.PUBLISH != 'true'
         working-directory: app
         shell: bash
         run: |
@@ -150,7 +173,7 @@ jobs:
 
       # The end of the build log as an annotation: readable from the run summary / API without downloading logs.
       - name: Report build failure
-        if: failure() && env.IS_TAG != 'true'
+        if: failure() && env.PUBLISH != 'true'
         shell: bash
         run: |
           node -e '
@@ -163,7 +186,7 @@ jobs:
           '
 
       - name: Upload installer artifact
-        if: env.IS_TAG != 'true'
+        if: env.PUBLISH != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: holos-studio-windows-${{ github.sha }}
@@ -175,7 +198,7 @@ jobs:
 
       # Install on the runner, let the app create its Python environment, check the engine starts and stops.
       - name: Smoke test the installer
-        if: env.IS_TAG != 'true'
+        if: env.PUBLISH != 'true'
         shell: pwsh
         run: |
           $setup = Get-ChildItem app/src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1

@@ -1,6 +1,6 @@
 [package]
 name = "holos-studio"
-version = "0.1.0"
+version = "0.2.0"
 description = "Holos Studio — podcast editor"
 authors = ["Brain From Ukraine"]
 license = "MIT"
@@ -17,5 +17,21 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-process = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Engine manager: hash of the bundled engine source, random per-launch API token.
+sha2 = "0.10"
+getrandom = "0.3"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
+
+# Windows only: Job Object so the engine (and the Python it starts) dies with the app.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }

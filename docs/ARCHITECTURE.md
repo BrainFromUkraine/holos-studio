@@ -91,7 +91,13 @@ Ported from the pipeline already used to master a real episode:
 
 ## Packaging
 
-- Windows installer (NSIS) with the engine source, `uv` and FFmpeg; Python dependencies, speech recognition and the NVIDIA CUDA libraries are installed on first run.
-- The app starts the engine in the background with a random per-launch token.
-- Updates come from GitHub Releases through the Tauri updater.
-- CUDA uses the user's installed NVIDIA driver; without an NVIDIA GPU speech recognition falls back to the CPU (int8), much slower.
+See [RELEASING.md](RELEASING.md).
+
+- Windows NSIS installer (per-user) with the app, the engine *source*, `uv.exe` and `ffmpeg.exe`.
+- On first launch the app runs `uv sync` into `%LOCALAPPDATA%\com.brainfromukraine.holos` (Python 3.12, CUDA wheels),
+  then starts `holos serve` hidden on a free port with a random token (`app/src-tauri/src/engine.rs`).
+- FFmpeg: a GPL "essentials" build (the bundled video template uses libx264); it is a separate executable with its
+  licence shipped next to it.
+- CUDA runtime: NVIDIA cuBLAS / cuDNN wheels from PyPI + the user's installed NVIDIA driver; CPU (int8) fallback when
+  no GPU is present — works, but speech recognition is much slower.
+- Updates: Tauri updater, signed, from GitHub Releases.

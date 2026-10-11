@@ -1,45 +1,67 @@
 # Holos Studio
 
-**Desktop podcast editor with transcript-based editing, professional voice processing, and AI control via MCP.**
+**A podcast editor that does the rough work for you.** Record your podcast, drop in the files and get an almost finished episode. You only review the result and polish the details.
 
-> 🚧 **Status: early development.** Nothing is usable yet — see the [roadmap](docs/ROADMAP.md).
+> 🚧 **Status: early version.** Runs on Windows from source; an installer with automatic updates is on the way. See the [roadmap](docs/ROADMAP.md).
 
 *Holos* (Голос) means "voice" in Ukrainian.
 
-## Why
+## How it works
 
-Making a spoken-word podcast sound professional usually means hours in a DAW: removing filler words, taming breaths, fixing long pauses, de-essing, compressing and hitting loudness targets. Holos Studio aims to make that a fast, text-first workflow that runs locally on your machine:
+1. **New project.** Drop in your recordings; they are copied into the project folder.
+2. **Automatic pass.**
+   - Files are joined in order.
+   - Pauses longer than X are shortened to Y (both thresholds are adjustable).
+   - Mouth clicks are removed, breaths are softened.
+   - Repeats and re-recorded takes are cut.
+   - Loudness is brought to the podcast standard (−16 LUFS).
+3. **Editor.** A track with the cuts already closed, and every splice visible: listen to it, restore it or move it. Blade, range selection, markers, and Ctrl+Z for everything.
+4. **Export.**
+   - Audio only: WAV / MP3 with chapters.
+   - Or video through your own template, with a live preview.
+   - Plus timecodes for YouTube.
+5. **Claude via MCP.** Makes timecodes and edits on request; everything it changes can be undone. Setup: [docs/MCP.md](docs/MCP.md).
 
-- **Edit audio by editing text.** Transcribe the recording, delete a word or sentence in the transcript, and the audio is cut with smooth crossfades.
-- **Find the junk automatically.** Filler words ("um", "uh", "еее"), false starts and repeats are highlighted for review — you decide what goes.
-- **Pro voice chain, one click.** Breath attenuation, pause tightening, de-click, de-ess, EQ, compression, and loudness normalisation to podcast standards (-16 LUFS, -1 dBTP).
-- **Non-destructive.** Source recordings are never modified; a project is a JSON edit list you can undo at any point.
-- **AI as a collaborator, not a black box.** Holos exposes an [MCP](https://modelcontextprotocol.io) server, so Claude (or any MCP-capable assistant) can inspect and edit a project with your approval.
-- **Export your way.** WAV / MP3 with chapters, timecodes for YouTube, and video through your own [templates](docs/TEMPLATES.md).
-- **Local first.** Transcription runs on your own GPU with Whisper; your recordings never leave your computer unless you choose to.
+## Principles
 
-## Planned architecture
+- Original recordings are never modified.
+- Everything runs locally on your own computer.
+- Every action can be undone.
+
+## Requirements
+
+- Windows 10 / 11
+- NVIDIA GPU with CUDA — recommended. Without one the program runs on the CPU, but speech recognition is much slower (tens of minutes for an hour of audio instead of a minute or two).
+
+## Run from source
+
+```powershell
+# terminal 1 — engine
+cd engine
+uv sync --extra asr --extra gpu --extra video
+uv run holos serve --dev
+
+# terminal 2 — app
+cd app
+npm install
+npm run tauri dev
+```
+
+Needs [uv](https://docs.astral.sh/uv/), [Node.js](https://nodejs.org), [Rust](https://rustup.rs) and [FFmpeg](https://ffmpeg.org) on `PATH`.
+
+## Inside
 
 | Part | Tech | Role |
 |---|---|---|
-| `engine/` | Python, faster-whisper (CUDA), NumPy/SciPy, FFmpeg, FastAPI | Audio analysis & processing, transcription, rendering, local API |
-| `engine/src/holos/mcp_server.py` | Python MCP SDK | MCP server on top of the engine — [docs/MCP.md](docs/MCP.md) |
-| `app/` | Tauri v2, Next.js | Desktop UI: transcript editor, waveform, processing panel |
+| `engine/` | Python, faster-whisper (CUDA), NumPy/SciPy, FFmpeg, FastAPI | Analysis, automatic editing, voice processing, rendering, local API — [engine/README.md](engine/README.md) |
+| `engine/src/holos/mcp_server.py` | Python MCP SDK | Tools for Claude and other MCP clients — [docs/MCP.md](docs/MCP.md) |
+| `app/` | Tauri v2, Next.js | Desktop app: projects, editor, automation settings, export |
 
-Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Roadmap
-
-1. **Engine (CLI)** — import → transcribe → detect fillers → edit list → process → export
-2. **UI** — transcript editor with waveform
-3. **Desktop app** — Tauri packaging for Windows
-4. **MCP** — AI assistants can drive the engine
-
-Full list: [docs/ROADMAP.md](docs/ROADMAP.md).
+More: [architecture](docs/ARCHITECTURE.md) · [design](docs/DESIGN.md) · [video templates](docs/TEMPLATES.md).
 
 ## Contributing
 
-The project is at a very early stage. Issues and ideas are welcome; pull requests will be easier once the engine API settles.
+The project is at an early stage. Issues and ideas are welcome.
 
 ## License
 
@@ -49,17 +71,35 @@ The project is at a very early stage. Issues and ideas are welcome; pull request
 
 ## 🇺🇦 Українською
 
-**Holos Studio** — desktop-редактор подкастів, де звук редагується через текст.
+**Holos Studio — редактор подкастів, який робить чорнову роботу за тебе.** Записав подкаст, кинув файли — і отримав майже готовий випуск. Ти лише переглядаєш результат і доводиш дрібниці.
 
-> 🚧 **Статус: рання розробка.** Поки нічим не можна користуватися — див. [roadmap](docs/ROADMAP.md).
+> 🚧 **Статус: рання версія.** Працює на Windows із вихідного коду; інсталятор з автооновленням — на підході.
 
-**Що буде вміти:**
+### Як це працює
 
-- **Редагування через транскрипт.** Видаляєш слово в тексті — воно вирізається зі звуку з плавним переходом.
-- **Пошук сміття.** Слова-паразити («еее», «ммм»), затинання й повтори підсвічуються, а рішення, що різати, лишається за тобою.
-- **Професійна обробка голосу в один клік.** Вдихи, довгі паузи, de-click, de-ess, EQ, компресія, гучність `-16 LUFS`.
-- **Неруйнівне редагування.** Оригінальні записи ніколи не змінюються.
-- **AI через MCP.** Claude чи інший AI-асистент може працювати з проєктом з твого дозволу.
-- **Локально.** Розпізнавання мови працює на твоїй відеокарті, тож записи не залишають комп'ютер.
+1. **Новий проєкт.** Перетягуєш записи, вони копіюються в папку проєкту.
+2. **Автоматична обробка.**
+   - Файли склеюються по порядку.
+   - Паузи довші за X скорочуються до Y (пороги налаштовуються).
+   - Клацання слини прибираються, вдихи приглушуються.
+   - Повтори й перезаписані дублі вирізаються.
+   - Гучність вирівнюється до −16 LUFS.
+3. **Редактор.** Доріжка, на якій вирізи вже закриті, і кожну склейку видно: послухати, відновити, посунути. Лезо, виділення діапазону, маркери, Ctrl+Z на все.
+4. **Експорт.**
+   - Тільки аудіо: WAV / MP3 з розділами.
+   - Або відео за твоїм шаблоном, з живим прев'ю.
+   - Плюс таймкоди для YouTube.
+5. **Claude через MCP.** Робить таймкоди і правки на твоє прохання, усе скасовується.
+
+### Принципи
+
+- Оригінали не змінюються.
+- Все працює локально, на твоєму комп'ютері.
+- Будь-яку дію можна скасувати.
+
+### Вимоги
+
+- Windows 10 / 11
+- Відеокарта NVIDIA з CUDA — рекомендована. Без неї програма працює на процесорі, але розпізнавання мови значно повільніше (десятки хвилин на годину запису замість однієї-двох).
 
 Проєкт від каналу [Brain From Ukraine](https://github.com/BrainFromUkraine). Ліцензія — [MIT](LICENSE).

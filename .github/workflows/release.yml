@@ -108,6 +108,11 @@ jobs:
         run: |
           if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
             echo "Signing key present: update artifacts will be signed."
+            # Shape of the secrets without revealing them: lengths and the key's public header line.
+            k="$TAURI_SIGNING_PRIVATE_KEY"; pw="$TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+            hdr=$(printf '%s' "$k" | tr -d ' \r\n' | base64 -d 2>/dev/null | head -1 | tr -cd '[:print:]')
+            ws=$(printf '%s' "$pw" | grep -c '[[:space:]]' || true)
+            echo "::notice title=Signing secrets::key ${#k} chars (expected 348), header '${hdr}'; password ${#pw} chars (expected 32), whitespace lines: ${ws}"
             echo "config=" >> "$GITHUB_OUTPUT"
           elif [ "$PUBLISH" = "true" ]; then
             echo "::error::TAURI_SIGNING_PRIVATE_KEY secret is missing — a release without signed updates would break auto-update."

@@ -10,6 +10,8 @@ name: Release
 on:
   push:
     tags: ["v*"]
+    # TEMPORARY: workflow_dispatch only works once this file is on main; build-only test runs on this branch.
+    branches: [packaging]
   workflow_dispatch:
 
 permissions:

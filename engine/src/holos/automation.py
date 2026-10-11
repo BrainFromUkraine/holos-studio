@@ -26,6 +26,11 @@ def sync_chain(p: Project) -> None:
     mc.enabled = a.clicks != "off"
     if a.clicks != "off":
         mc.params["strength"] = a.clicks
+    for c in p.chain:
+        if c.module in a.voice:
+            c.enabled = bool(a.voice[c.module])
+        if c.module == "loudness":
+            c.params["target_lufs"] = a.target_lufs
 
 
 def apply(p: Project) -> dict:
@@ -34,6 +39,7 @@ def apply(p: Project) -> dict:
     p.analysis_settings.pause_max = a.pause_max
     p.analysis_settings.pause_target = a.pause_target
     p.analysis_settings.breath_db = a.breath_db
+    p.timeline_settings.crossfade = max(0.005, min(0.25, a.crossfade_ms / 1000))
     counts: dict[str, int] = {}
     for e in p.edits:
         if e.touched:
@@ -64,9 +70,12 @@ def update(p: Project, changes: dict) -> Automation:
     """Merge partial settings (as sent by the app or Claude) and re-apply."""
     data = p.automation.model_dump()
     kinds = changes.pop("kinds", None)
+    voice = changes.pop("voice", None)
     data.update({k: v for k, v in changes.items() if k in data})
     if kinds:
         data["kinds"] = {**data["kinds"], **kinds}
+    if voice:
+        data["voice"] = {**data["voice"], **voice}
     p.automation = Automation.model_validate(data)
     apply(p)
     return p.automation

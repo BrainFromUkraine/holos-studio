@@ -1,23 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { EngineBanner } from "@/components/Shell";
-import { Lanes, laneLayout, selectionText, type Assets, type Sel, type View } from "@/components/editor/Lanes";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { EngineBanner, useEngine } from "@/components/Shell";
 import { Overview, OVERVIEW_H } from "@/components/editor/Overview";
 import { Player, type Pos } from "@/components/editor/player";
+import { drawCloseUp, spliceLabel, TimelineCanvas, type Assets, type ESel, type Tool, type View } from "@/components/editor/Timeline";
 import { currentProject, engine, type EditRequest } from "@/lib/engine";
-import { KIND_LABEL, episodeTime, fmtShort, fmtTc, reasonUk, type Timeline, type TlEdit } from "@/lib/timeline";
+import { buildPieces, clipBoxes, fmtEp, rangeToSources, toSource } from "@/lib/resultmap";
+import { episodeTime, reasonUk, type Timeline } from "@/lib/timeline";
 
-type Filter = "questions" | "auto" | "mine" | "all";
-const LABEL_W = 104;
-
-const KIND_COLOR: Record<string, string> = {
-  pause: "#6a706a",
-  breath: "var(--breath)",
-  fill: "var(--dim)",
-};
-const colorOf = (e: TlEdit) => (e.type === "cut" ? (e.status === "suggested" ? "var(--question)" : e.status === "rejected" ? "var(--muted)" : "var(--cut)") : KIND_COLOR[e.kind] ?? "var(--dim)");
+const HEAD_W = 190;
+const MAX_PPS = 1500;
 
 function useAssets(path: string | null, tl: Timeline | null): Assets {
   const [a, setA] = useState<Assets>({ peaks: {}, spec: {}, loud: {}, version: 0 });
@@ -25,7 +19,6 @@ function useAssets(path: string | null, tl: Timeline | null): Assets {
   useEffect(() => {
     if (!path || !tl) return;
     let alive = true;
-    const ids = tl.sources.map((s) => s.id);
     const bump = (f: (p: Assets) => Assets) => alive && setA((p) => ({ ...f(p), version: p.version + 1 }));
     const one = async (sid: string) => {
       try {
@@ -33,10 +26,7 @@ function useAssets(path: string | null, tl: Timeline | null): Assets {
         bump((p) => ({ ...p, peaks: { ...p.peaks, [sid]: pk } }));
         await new Promise<void>((res) => {
           const img = new Image();
-          img.onload = () => {
-            bump((p) => ({ ...p, spec: { ...p.spec, [sid]: img } }));
-            res();
-          };
+          img.onload = () => { bump((p) => ({ ...p, spec: { ...p.spec, [sid]: img } })); res(); };
           img.onerror = () => res();
           img.src = engine.assetUrl("spectrogram", path, sid);
         });
@@ -44,134 +34,153 @@ function useAssets(path: string | null, tl: Timeline | null): Assets {
         bump((p) => ({ ...p, loud: { ...p.loud, [sid]: L } }));
       } catch {}
     };
-    (async () => {
-      const queue = [...ids];
-      await Promise.all(Array.from({ length: 3 }, async () => {
-        while (alive && queue.length) await one(queue.shift()!);
-      }));
-    })();
-    return () => {
-      alive = false;
-    };
+    const queue = tl.sources.map((s) => s.id);
+    Promise.all(Array.from({ length: 3 }, async () => { while (alive && queue.length) await one(queue.shift()!); }));
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path, key]);
   return a;
 }
 
-export default function EditPage() {
+const TOOLS: { id: Tool; label: string; key: string; icon: ReactNode }[] = [
+  { id: "select", label: "Вибір", key: "A", icon: <path d="M5 3l14 8-6 2-3 6z" /> },
+  { id: "blade", label: "Лезо", key: "B", icon: <><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12" /></> },
+  { id: "range", label: "Діапазон", key: "R", icon: <path d="M4 4v16M20 4v16M4 12h16" /> },
+];
+
+export default function EditorPage() {
+  const { health } = useEngine();
   const [path, setPath] = useState<string | null>(null);
   const [tl, setTl] = useState<Timeline | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [sel, setSel] = useState<Sel>(null);
-  const [filter, setFilter] = useState<Filter>("questions");
+  const [tool, setTool] = useState<Tool>("select");
+  const [snap, setSnap] = useState(true);
+  const [showSpec, setShowSpec] = useState(true);
+  const [loop, setLoop] = useState(false);
+  const [sel, setSel] = useState<ESel>(null);
+  const [splits, setSplits] = useState<number[]>([]);
   const [view, setView] = useState<View>({ x0: 0, pps: 1 });
-  const [width, setWidth] = useState(0);
-  const [height, setHeight] = useState(0);
-  const [pos, setPos] = useState<Pos | null>(null);
+  const [T, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
-  const [mode, setMode] = useState<"result" | "original">("result");
-  const player = useRef<Player | null>(null);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  const [markerTitle, setMarkerTitle] = useState("");
   const area = useRef<HTMLDivElement>(null);
+  const player = useRef<Player | null>(null);
+  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const stamp = useRef<number | null>(null);
   const fitted = useRef(false);
   const assets = useAssets(path, tl);
-  const layout = useMemo(() => laneLayout(height - OVERVIEW_H - 46), [height]);
-  const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const pieces = useMemo(() => (tl ? buildPieces(tl) : []), [tl]);
+  const clips = useMemo(() => (tl ? clipBoxes(tl, pieces) : []), [tl, pieces]);
+  const length = tl?.length ?? 0;
+  const width = Math.max(200, size.w - HEAD_W);
 
-  // ---- load -------------------------------------------------------------------------------------
-  useEffect(() => {
-    const p = currentProject.get();
-    setPath(p);
-    if (!p) return;
-    engine.timeline(p).then((t) => {
-      setTl(t);
-      const q = t.edits.filter((e) => e.status === "suggested").sort((a, b) => (a.episode_time ?? 0) - (b.episode_time ?? 0));
-      if (q.length) setSel({ kind: "edit", id: q[0].id });
-      else setFilter("all");
-      if (t.sources[0]) setPos({ sid: t.sources[0].id, t: t.sources[0].a0 ?? 0 });
-    }).catch((e) => setErr(String(e.message ?? e)));
-    const pl = new Player(p);
-    pl.onTick = (q) => setPos(q);
-    pl.onState = (on) => setPlaying(on);
-    player.current = pl;
-    return () => pl.destroy();
+  // ---- load & external changes (Claude via MCP edits the same project) --------------------------
+  const refreshStamp = useCallback(async (p: string) => {
+    try { stamp.current = (await engine.stamp(p)).mtime; } catch {}
   }, []);
 
   useEffect(() => {
-    if (tl) player.current?.setTimeline(tl);
-  }, [tl]);
-  useEffect(() => {
-    player.current?.setMode(mode);
-  }, [mode]);
+    const p = currentProject.get();
+    setPath(p);
+    if (!p || !health) return;
+    engine.timeline(p).then((t) => {
+      setTl(t);
+      currentProject.set(p, t.name);
+      refreshStamp(p);
+    }).catch((e) => setErr(String(e.message ?? e)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Boolean(health)]);
 
-  // canvas width follows the window
+  useEffect(() => {
+    if (!path) return;
+    const id = setInterval(async () => {
+      try {
+        const m = (await engine.stamp(path)).mtime;
+        if (m && stamp.current && m > stamp.current + 0.001) {
+          stamp.current = m;
+          setTl(await engine.timeline(path));
+        }
+      } catch {}
+    }, 3000);
+    return () => clearInterval(id);
+  }, [path]);
+
+  useEffect(() => {
+    if (!path) return;
+    const pl = new Player(path);
+    pl.onState = setPlaying;
+    player.current = pl;
+    return () => pl.destroy();
+  }, [path]);
+
+  useEffect(() => { if (tl) player.current?.setTimeline(tl); }, [tl]);
+
   useEffect(() => {
     const el = area.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => {
-      setWidth(Math.max(200, el.clientWidth - LABEL_W));
-      setHeight(el.clientHeight);
-    });
+    const ro = new ResizeObserver(() => setSize({ w: el.clientWidth, h: el.clientHeight }));
     ro.observe(el);
     return () => ro.disconnect();
   }, [tl]);
 
-  const total = tl?.original_length ?? 1;
-  const clampView = useCallback(
-    (v: View): View => {
-      const minPps = width / Math.max(1, total);
-      const pps = Math.max(minPps, Math.min(2000, v.pps));
-      const span = width / pps;
-      return { pps, x0: Math.min(Math.max(-0.5, v.x0), Math.max(0, total - span + 0.5)) };
-    },
-    [width, total],
-  );
+  const minPps = width / Math.max(1, length);
+  const clampView = useCallback((v: View): View => {
+    const pps = Math.max(minPps, Math.min(MAX_PPS, v.pps));
+    const span = width / pps;
+    return { pps, x0: Math.max(-0.5, Math.min(v.x0, Math.max(0, length - span + 0.5))) };
+  }, [minPps, width, length]);
   const changeView = useCallback((v: View) => setView(clampView(v)), [clampView]);
 
-  // start with the whole episode in view
   useEffect(() => {
-    if (tl && width > 0 && !fitted.current) {
+    if (tl && size.w > 0 && !fitted.current) {
       fitted.current = true;
-      setView({ x0: 0, pps: width / Math.max(1, tl.original_length) });
+      setView({ x0: 0, pps: width / Math.max(1, length) });
     }
-  }, [tl, width]);
+  }, [tl, size.w, width, length]);
 
-  const xOf = useCallback((sid: string, t: number) => {
-    const s = tl?.sources.find((q) => q.id === sid);
-    return s ? s.offset + t : 0;
-  }, [tl]);
-
-  // keep the playhead visible while playing
+  // ---- playback ---------------------------------------------------------------------------------
+  const posOf = useCallback((Tt: number): Pos | null => toSource(pieces, Tt), [pieces]);
   useEffect(() => {
-    if (!playing || !pos || !tl) return;
-    const x = xOf(pos.sid, pos.t);
-    const span = width / view.pps;
-    if (x > view.x0 + span * 0.92 || x < view.x0) changeView({ ...view, x0: x - span * 0.1 });
-  }, [pos, playing, tl, width, view, xOf, changeView]);
+    const pl = player.current;
+    if (!pl || !tl) return;
+    pl.onTick = (p) => {
+      const e = episodeTime(tl, p.sid, p.t);
+      if (e === null) return;
+      setT(e);
+      if (loop && sel?.kind === "range" && e >= Math.max(sel.A, sel.B)) {
+        const from = posOf(Math.min(sel.A, sel.B));
+        if (from) pl.play(from);
+      }
+    };
+  }, [tl, loop, sel, posOf]);
 
-  const zoomTo = (seconds: number | "all") => {
-    if (!tl) return;
-    if (seconds === "all") return changeView({ x0: 0, pps: width / Math.max(1, tl.original_length) });
-    const center = pos ? xOf(pos.sid, pos.t) : view.x0 + width / view.pps / 2;
-    const pps = width / seconds;
-    changeView({ pps, x0: center - seconds * 0.35 });
+  useEffect(() => {
+    if (!playing) return;
+    const span = width / view.pps;
+    if (T > view.x0 + span * 0.92 || T < view.x0) changeView({ ...view, x0: T - span * 0.1 });
+  }, [T, playing, view, width, changeView]);
+
+  const play = (from: number, until?: number) => {
+    const pl = player.current;
+    const a = posOf(from);
+    if (!pl || !a) return;
+    pl.pause();
+    pl.play(a, until !== undefined ? posOf(until) : null);
   };
-
-  const focusEdit = (e: TlEdit) => {
-    setSel({ kind: "edit", id: e.id });
-    const x0 = xOf(e.source, e.start);
-    const x1 = xOf(e.source, e.end);
-    const span = width / view.pps;
-    const needZoom = span > 60 || x1 - x0 > span * 0.8;
-    const pps = needZoom ? width / Math.max(8, (x1 - x0) * 4) : view.pps;
-    const nspan = width / pps;
-    if (needZoom || x0 < view.x0 || x1 > view.x0 + span) changeView({ pps, x0: (x0 + x1) / 2 - nspan / 2 });
-    setPos({ sid: e.source, t: Math.max(0, e.start - 1) });
+  const togglePlay = () => {
+    if (playing) return player.current?.pause();
+    if (loop && sel?.kind === "range") return play(Math.min(sel.A, sel.B));
+    play(T);
+  };
+  const seek = (Tt: number) => {
+    setT(Tt);
+    if (playing) play(Tt);
   };
 
   // ---- edits ------------------------------------------------------------------------------------
-  // operations run strictly one after another, so a fast Ctrl+Z never overtakes the cut it should undo
-  const run = (req: Omit<EditRequest, "path">, next?: (t: Timeline & { id?: string }) => void) => {
+  const run = (req: Omit<EditRequest, "path">, after?: (t: Timeline & { ids?: string[] }) => void) => {
     if (!path) return;
     setBusy(true);
     setErr(null);
@@ -179,7 +188,8 @@ export default function EditPage() {
       try {
         const t = await engine.edit({ path, ...req });
         setTl(t);
-        next?.(t);
+        after?.(t);
+        await refreshStamp(path);
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
       } finally {
@@ -188,277 +198,284 @@ export default function EditPage() {
     });
   };
 
-  const questions = useMemo(() => (tl?.edits ?? []).filter((e) => e.status === "suggested").sort((a, b) => (a.episode_time ?? 0) - (b.episode_time ?? 0)), [tl]);
-  const selected = sel?.kind === "edit" ? tl?.edits.find((e) => e.id === sel.id) ?? null : null;
-
-  const decide = (e: TlEdit, cut: boolean) => {
-    const wasQuestion = e.status === "suggested";
-    run({ op: "status", ids: [e.id], status: cut ? "accepted" : "rejected" }, (t) => {
-      if (!wasQuestion) return;
-      const rest = t.edits.filter((x) => x.status === "suggested").sort((a, b) => (a.episode_time ?? 0) - (b.episode_time ?? 0));
-      const nxt = rest.find((x) => (x.episode_time ?? 0) >= (e.episode_time ?? 0)) ?? rest[0];
-      if (nxt) focusEdit(nxt);
+  const cutRange = (A: number, B: number) => {
+    const ranges = rangeToSources(pieces, A, B);
+    if (!ranges.length) return;
+    run({ op: "cuts", ranges, snap }, () => {
+      setSel(null);
+      setSplits((s) => s.filter((x) => x < Math.min(A, B) - 0.01 || x > Math.max(A, B) + 0.01));
+      setT(Math.min(A, B));
     });
   };
 
-  const cutSelection = () => {
-    if (!sel || !tl) return;
-    if (sel.kind === "range") {
-      run({ op: "cut", source: sel.source, start: Math.min(sel.a, sel.b), end: Math.max(sel.a, sel.b), snap: true }, (t) => t.id && setSel({ kind: "edit", id: t.id }));
-    } else if (sel.kind === "words") {
-      run({ op: "cut_words", source: sel.source, i0: Math.min(sel.i0, sel.i1), i1: Math.max(sel.i0, sel.i1) }, (t) => t.id && setSel({ kind: "edit", id: t.id }));
-    } else if (selected) {
-      if (selected.kind === "manual") run({ op: "delete", id: selected.id }, () => setSel(null));
-      else decide(selected, true);
-    }
+  const splice = sel?.kind === "splice" ? tl?.splices[sel.i] ?? null : null;
+  const spliceEdits = useMemo(() => (splice && tl ? tl.edits.filter((e) => splice.edits.includes(e.id)) : []), [splice, tl]);
+  const cutEdits = spliceEdits.filter((e) => e.type === "cut");
+  const leftEdit = cutEdits.length ? cutEdits.reduce((a, b) => (b.start < a.start ? b : a)) : null;
+  const rightEdit = cutEdits.length ? cutEdits.reduce((a, b) => (b.end > a.end ? b : a)) : null;
+
+  const restore = () => {
+    if (!splice) return;
+    const at = splice.episode_time;
+    run({ op: "status", ids: splice.edits, status: "rejected" }, () => { setSel(null); setT(at); });
   };
 
-  const nudge = (e: TlEdit, edge: "start" | "end", ms: number) =>
-    run({ op: "adjust", id: e.id, ...(edge === "start" ? { start: e.start + ms / 1000 } : { end: e.end + ms / 1000 }) });
-
-  // ---- playback ---------------------------------------------------------------------------------
-  const togglePlay = () => {
-    const pl = player.current;
-    if (!pl || !pos) return;
-    if (playing) pl.pause();
-    else pl.play(pos);
+  const saveMarkers = (list: { time: number; title: string }[]) => {
+    if (!path) return;
+    setBusy(true);
+    engine.setChapters(path, list).then(async () => {
+      setTl(await engine.timeline(path));
+      await refreshStamp(path);
+    }).catch((e) => setErr(String(e.message ?? e))).finally(() => setBusy(false));
+  };
+  const addMarker = (at: number) => {
+    if (!tl) return;
+    const list = [...tl.chapters.map((c) => ({ time: c.time, title: c.title })), { time: at, title: tl.chapters.length ? "Новий розділ" : "Вступ" }];
+    saveMarkers(list);
   };
 
-  const listen = (sid: string, a: number, b: number) => {
-    const pl = player.current;
-    if (!pl) return;
-    pl.pause();
-    pl.play({ sid, t: Math.max(0, a - 2) }, { sid, t: b + 2 });
-  };
+  useEffect(() => {
+    if (sel?.kind === "marker" && tl) setMarkerTitle(tl.chapters[sel.i]?.title ?? "");
+  }, [sel, tl]);
 
-  const seek = (sid: string, t: number) => {
-    setPos({ sid, t });
-    if (playing) player.current?.play({ sid, t });
+  const jumpSplice = (dir: 1 | -1) => {
+    if (!tl?.splices.length) return;
+    const list = tl.splices.map((s, i) => ({ i, t: s.episode_time })).sort((a, b) => a.t - b.t);
+    const cur = sel?.kind === "splice" ? tl.splices[sel.i].episode_time : T;
+    const nxt = dir > 0 ? list.find((s) => s.t > cur + 0.01) : [...list].reverse().find((s) => s.t < cur - 0.01);
+    if (!nxt) return;
+    setSel({ kind: "splice", i: nxt.i });
+    setT(Math.max(0, nxt.t - 1.5));
+    const span = width / view.pps;
+    if (nxt.t < view.x0 || nxt.t > view.x0 + span) changeView({ ...view, x0: nxt.t - span / 2 });
   };
-
-  // ---- list -------------------------------------------------------------------------------------
-  const lists = useMemo(() => {
-    const es = [...(tl?.edits ?? [])].sort((a, b) => (a.episode_time ?? 0) - (b.episode_time ?? 0) || a.start - b.start);
-    return {
-      questions: es.filter((e) => e.status === "suggested"),
-      auto: es.filter((e) => e.status !== "suggested" && e.kind !== "manual" && (e.type === "cut" || e.type === "pause")),
-      mine: es.filter((e) => e.kind === "manual"),
-      all: es,
-    };
-  }, [tl]);
-  const items = lists[filter];
 
   // ---- keyboard ---------------------------------------------------------------------------------
   useEffect(() => {
-    const onKey = (ev: KeyboardEvent) => {
-      const tag = (ev.target as HTMLElement)?.tagName;
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      const k = ev.key.toLowerCase();
-      const mod = ev.ctrlKey || ev.metaKey;
-      if (mod && (k === "z" || k === "я")) {
-        ev.preventDefault();
-        run({ op: ev.shiftKey ? "redo" : "undo" });
-      } else if (mod && (k === "y" || k === "н")) {
-        ev.preventDefault();
-        run({ op: "redo" });
-      } else if (ev.code === "Space") {
-        ev.preventDefault();
-        togglePlay();
-      } else if (!mod && (ev.code === "KeyY" || ev.code === "KeyN")) {
-        const target = selected?.type === "cut" ? selected : questions[0];
-        if (target) decide(target, ev.code === "KeyY");
-      } else if (!mod && (ev.code === "KeyC" || k === "delete" || k === "backspace")) {
-        ev.preventDefault();
-        cutSelection();
-      } else if (k === "arrowdown" || k === "arrowup") {
-        ev.preventDefault();
-        const i = selected ? items.findIndex((e) => e.id === selected.id) : -1;
-        const nxt = items[k === "arrowdown" ? i + 1 : Math.max(0, i - 1)];
-        if (nxt) focusEdit(nxt);
-      } else if (k === "home" && tl?.sources[0]) {
-        seek(tl.sources[0].id, tl.sources[0].a0 ?? 0);
-      } else if (k === "=" || k === "+") {
-        changeView({ x0: view.x0 + (width / view.pps) * 0.25, pps: view.pps * 2 });
-      } else if (k === "-") {
-        changeView({ x0: view.x0 - width / view.pps / 2, pps: view.pps / 2 });
-      } else if (k === "escape") {
-        setSel(null);
-      }
+      const mod = e.ctrlKey || e.metaKey;
+      const code = e.code;
+      if (mod && code === "KeyZ") { e.preventDefault(); run({ op: e.shiftKey ? "redo" : "undo" }); }
+      else if (mod && code === "KeyY") { e.preventDefault(); run({ op: "redo" }); }
+      else if (code === "Space") { e.preventDefault(); togglePlay(); }
+      else if (!mod && (code === "KeyA" || code === "KeyV")) setTool("select");
+      else if (!mod && code === "KeyB") setTool("blade");
+      else if (!mod && code === "KeyR") setTool("range");
+      else if (!mod && code === "KeyM") addMarker(T);
+      else if (!mod && code === "KeyL") setLoop((l) => !l);
+      else if ((code === "Delete" || code === "Backspace" || code === "KeyC") && sel?.kind === "range") { e.preventDefault(); cutRange(sel.A, sel.B); }
+      else if (code === "ArrowRight") { e.preventDefault(); jumpSplice(1); }
+      else if (code === "ArrowLeft") { e.preventDefault(); jumpSplice(-1); }
+      else if (code === "Home") seek(0);
+      else if (code === "End") seek(length);
+      else if (code === "Equal" || code === "NumpadAdd") changeView({ x0: view.x0 + (width / view.pps) * 0.25, pps: view.pps * 2 });
+      else if (code === "Minus" || code === "NumpadSubtract") changeView({ x0: view.x0 - width / view.pps / 2, pps: view.pps / 2 });
+      else if (code === "Escape") { setSel(null); setSplits([]); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
 
+  // close-up of the selected splice
+  const close = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    if (splice && close.current) drawCloseUp(close.current, pieces, assets, splice.episode_time - 1.2, splice.episode_time + 1.2);
+  }, [splice, pieces, assets, assets.version]);
+
   if (!path) {
-    return (
-      <div className="main" style={{ padding: 20 }}>
-        <div className="banner">Проєкт не відкрито. <Link href="/import/">Почніть з імпорту</Link>.</div>
-      </div>
-    );
+    return <div className="main" style={{ padding: 20 }}><div className="banner">Проєкт не відкрито. <Link href="/">Виберіть або створіть проєкт</Link>.</div></div>;
   }
 
-  const epNow = tl && pos ? episodeTime(tl, pos.sid, pos.t) : null;
-  const srcName = tl && pos ? tl.sources.find((s) => s.id === pos.sid)?.name.replace(/\.wav$/i, "") : "";
+  const counts: Record<string, number> = {};
+  for (const e of tl?.edits ?? []) if (e.status === "accepted") counts[e.kind] = (counts[e.kind] ?? 0) + 1;
+  const zoomLog = (pps: number) => Math.round((Math.log(pps / minPps) / Math.log(MAX_PPS / minPps)) * 100);
+  const fromZoomLog = (v: number) => minPps * Math.pow(MAX_PPS / minPps, v / 100);
+  const recorded = tl?.sources.reduce((a, s) => a + s.duration, 0) ?? 0;
   const m = tl?.measured;
+  const auto = tl?.automation;
 
   return (
-    <div style={{ height: "calc(100vh - 64px)", display: "flex", flexDirection: "column", minHeight: 0 }}>
+    <div className="full">
       {/* ---- toolbar ---- */}
-      <div role="toolbar" aria-label="Транспорт і масштаб" style={{ minHeight: 52, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, padding: "6px 14px", background: "var(--panel)", borderBottom: "1px solid var(--border)" }}>
-        <div role="group" aria-label="Транспорт" style={{ display: "flex", gap: 4 }}>
-          <button className="btn" style={{ width: 34, height: 34, padding: 0 }} aria-label="На початок (Home)" title="На початок (Home)" onClick={() => tl?.sources[0] && seek(tl.sources[0].id, tl.sources[0].a0 ?? 0)}>
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><rect x="2" y="2" width="1.6" height="10" /><path d="M12 2v10L4.5 7z" /></svg>
-          </button>
-          <button className="btn primary" style={{ width: 42, height: 34, padding: 0 }} aria-label={playing ? "Пауза (Пробіл)" : "Відтворити (Пробіл)"} title="Пробіл" onClick={togglePlay}>
-            {playing ? (
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><rect x="3" y="2" width="3" height="10" /><rect x="8" y="2" width="3" height="10" /></svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M3 2l9 5-9 5z" /></svg>
-            )}
-          </button>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", padding: "2px 12px", background: "var(--lane)", border: "1px solid var(--border)", minWidth: 200 }}>
-          <span className="mono" style={{ fontSize: 19, color: "var(--bright)" }}>{fmtTc(epNow)}</span>
-          <span className="mono muted" style={{ fontSize: 11 }}>
-            {srcName ? `${srcName} · ${fmtShort(pos?.t)}` : ""} · з {fmtTc(tl?.length, false)}
-          </span>
-        </div>
-        <div role="group" aria-label="Масштаб" style={{ display: "flex", border: "1px solid var(--border)" }}>
-          {([["all", "Увесь епізод"], [60, "1 хв"], [10, "10 с"]] as [number | "all", string][]).map(([v, l]) => (
-            <button key={String(v)} className="btn" style={{ height: 34, border: 0 }} onClick={() => zoomTo(v)}>{l}</button>
+      <div role="toolbar" aria-label="Інструменти" style={{ flex: "0 0 48px", display: "flex", alignItems: "center", gap: 10, padding: "0 12px", background: "var(--panel)", borderBottom: "1px solid var(--border)" }}>
+        <div role="group" aria-label="Інструмент" style={{ display: "flex", border: "1px solid var(--border)" }}>
+          {TOOLS.map((t) => (
+            <button key={t.id} className="tool" aria-pressed={tool === t.id} title={`${t.label} (${t.key})`} onClick={() => setTool(t.id)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">{t.icon}</svg>
+              {t.label} <span className="kbd">{t.key}</span>
+            </button>
           ))}
         </div>
-        <div role="radiogroup" aria-label="Що слухати" style={{ display: "flex", border: "1px solid var(--border)" }}>
-          {([["result", "Результат"], ["original", "Оригінал"]] as const).map(([v, l]) => (
-            <button key={v} role="radio" aria-checked={mode === v} className="btn" title={v === "result" ? "Вирізане пропускається" : "Усе як записано"} style={{ height: 34, border: 0, background: mode === v ? "var(--sel)" : undefined, color: mode === v ? "var(--bright)" : "var(--text2)" }} onClick={() => setMode(v)}>{l}</button>
-          ))}
-        </div>
+        <button className="tool" style={{ border: "1px solid var(--border)", color: snap ? "var(--core)" : undefined, background: snap ? "var(--sel-row)" : undefined }} aria-pressed={snap}
+          title="Межі різу самі зсуваються в найтихіше місце поруч" onClick={() => setSnap((s) => !s)}>Прилипання до тиші</button>
         <div role="group" aria-label="Історія" style={{ display: "flex", gap: 4 }}>
-          <button className="btn" style={{ height: 34 }} disabled={!tl?.history.can_undo || busy} title={`Скасувати${tl?.history.undo_label ? `: ${tl.history.undo_label}` : ""} (Ctrl+Z)`} onClick={() => run({ op: "undo" })}>↶ Скасувати</button>
-          <button className="btn" style={{ height: 34 }} disabled={!tl?.history.can_redo || busy} title={`Повторити${tl?.history.redo_label ? `: ${tl.history.redo_label}` : ""} (Ctrl+Shift+Z)`} onClick={() => run({ op: "redo" })}>↷</button>
+          <button className="iconbtn" aria-label="Скасувати (Ctrl+Z)" title={`Скасувати${tl?.history.undo_label ? `: ${tl.history.undo_label}` : ""} (Ctrl+Z)`} disabled={!tl?.history.can_undo || busy} onClick={() => run({ op: "undo" })}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M9 14L4 9l5-5" /><path d="M4 9h10a6 6 0 010 12h-3" /></svg>
+          </button>
+          <button className="iconbtn" aria-label="Повторити (Ctrl+Shift+Z)" title={`Повторити${tl?.history.redo_label ? `: ${tl.history.redo_label}` : ""} (Ctrl+Shift+Z)`} disabled={!tl?.history.can_redo || busy} onClick={() => run({ op: "redo" })}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M15 14l5-5-5-5" /><path d="M20 9H10a6 6 0 000 12h3" /></svg>
+          </button>
         </div>
-        <div style={{ marginLeft: "auto", display: "flex", gap: 16, alignItems: "center" }}>
-          <div className="mono" style={{ display: "grid", gridTemplateColumns: "repeat(3, auto)", gap: "0 14px", fontSize: 11 }} title={m ? "Виміряно на останньому рендері" : "Ще не рендерилось — після експорту тут будуть виміри"}>
-            <span className="muted">INT</span><span className="muted">LRA</span><span className="muted">TP</span>
-            <span style={{ color: "var(--bright)", fontSize: 13 }}>{m?.integrated_lufs?.toFixed(1) ?? "—"}</span>
-            <span style={{ color: "var(--bright)", fontSize: 13 }}>{m?.lra_lu?.toFixed(1) ?? "—"}</span>
-            <span style={{ color: "var(--bright)", fontSize: 13 }}>{m?.true_peak_dbtp?.toFixed(1) ?? "—"}</span>
-          </div>
-          <Link href="/export/" className="btn primary" style={{ height: 34, display: "flex", alignItems: "center", textDecoration: "none" }}>До експорту</Link>
+
+        <div role="group" aria-label="Транспорт" style={{ marginLeft: "auto", display: "flex", gap: 3 }}>
+          <button className="iconbtn" aria-label="На початок (Home)" onClick={() => seek(0)}><svg width="12" height="12" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><rect x="2" y="2" width="1.6" height="10" /><path d="M12 2v10L4.5 7z" /></svg></button>
+          <button className="iconbtn" aria-label="Назад 5 с" onClick={() => seek(Math.max(0, T - 5))}><svg width="14" height="12" viewBox="0 0 16 14" fill="currentColor" aria-hidden="true"><path d="M8 2v10L2 7zM15 2v10L9 7z" /></svg></button>
+          <button className="btn primary" style={{ width: 46, height: 32, padding: 0 }} aria-label={playing ? "Пауза (Пробіл)" : "Відтворити (Пробіл)"} onClick={togglePlay}>
+            {playing ? <svg width="12" height="12" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><rect x="3" y="2" width="3" height="10" /><rect x="8" y="2" width="3" height="10" /></svg>
+              : <svg width="12" height="12" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M3 2l9 5-9 5z" /></svg>}
+          </button>
+          <button className="iconbtn" aria-label="Вперед 5 с" onClick={() => seek(Math.min(length, T + 5))}><svg width="14" height="12" viewBox="0 0 16 14" fill="currentColor" aria-hidden="true"><path d="M1 2v10l6-5zM8 2v10l6-5z" /></svg></button>
+          <button className="iconbtn" aria-pressed={loop} aria-label="Цикл виділеного (L)" title="Цикл виділеного (L)" onClick={() => setLoop((l) => !l)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M17 2l3 3-3 3" /><path d="M4 11V9a4 4 0 014-4h12" /><path d="M7 22l-3-3 3-3" /><path d="M20 13v2a4 4 0 01-4 4H4" /></svg>
+          </button>
         </div>
+        <div style={{ padding: "2px 12px", background: "var(--lane)", border: "1px solid var(--border)", display: "flex", flexDirection: "column", minWidth: 160 }}>
+          <span className="mono" style={{ fontSize: 19, color: "var(--bright)" }}>{fmtEp(T, true)}</span>
+          <span className="mono muted" style={{ fontSize: 10.5 }}>з {fmtEp(length)}</span>
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="muted" style={{ fontSize: 12 }}>Масштаб</span>
+          <input type="range" aria-label="Масштаб" min={0} max={100} value={Number.isFinite(zoomLog(view.pps)) ? zoomLog(view.pps) : 0}
+            onChange={(e) => { const pps = fromZoomLog(Number(e.target.value)); const c = view.x0 + width / view.pps / 2; changeView({ pps, x0: c - width / pps / 2 }); }} style={{ width: 120 }} />
+          <Link href="/automation/" className="btn" style={{ height: 32, display: "flex", alignItems: "center", gap: 6, textDecoration: "none" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></svg>
+            Автоматика
+          </Link>
+        </div>
+      </div>
+
+      {/* ---- what was done automatically ---- */}
+      <div style={{ flex: "0 0 32px", display: "flex", alignItems: "center", gap: 18, padding: "0 14px", background: "#0d0f0d", borderBottom: "1px solid var(--border)", fontSize: 12, color: "var(--text2)", whiteSpace: "nowrap", overflow: "hidden" }}>
+        <span className="muted">Зроблено автоматично:</span>
+        {([["repeat", "повтори", "var(--cut)"], ["retake", "дублі", "var(--cut)"], ["filler", "еее/ммм", "var(--cut)"], ["pause", "паузи", "#6a706a"], ["gain", "вдихи", "var(--breath)"], ["fill", "провали фону", "var(--dim)"]] as [string, string, string][]).map(([k, l, c]) => (
+          <span key={k}><i style={{ display: "inline-block", width: 8, height: 8, background: c, marginRight: 6 }} />{l} {counts[k === "gain" ? "breath" : k] ?? 0}</span>
+        ))}
+        <span><i style={{ display: "inline-block", width: 8, height: 8, background: auto?.clicks === "off" ? "var(--dim)" : "var(--loud)", marginRight: 6 }} />клацання слини {auto?.clicks === "off" ? "вимкнено" : "прибираються"}</span>
+        {counts.manual ? <span><i style={{ display: "inline-block", width: 8, height: 8, background: "var(--cut)", marginRight: 6 }} />мої різи {counts.manual}</span> : null}
+        <span className="mono muted" style={{ marginLeft: "auto" }}>{fmtEp(length)} · було {fmtEp(recorded)}</span>
       </div>
 
       <div style={{ flex: "1 1 auto", display: "flex", minHeight: 0 }}>
-        {/* ---- edit list ---- */}
-        <aside aria-label="Правки" style={{ flex: "0 0 270px", minWidth: 0, background: "var(--panel)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", minHeight: 0 }}>
-          <div role="tablist" aria-label="Фільтр правок" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", borderBottom: "1px solid var(--border)" }}>
-            {([["questions", "Питання"], ["auto", "Авто"], ["mine", "Мої"], ["all", "Усі"]] as [Filter, string][]).map(([f, l]) => (
-              <button key={f} role="tab" aria-selected={filter === f} onClick={() => setFilter(f)}
-                style={{ height: 40, border: 0, background: filter === f ? "var(--raised)" : "transparent", color: filter === f ? "var(--bright)" : "var(--text2)", boxShadow: filter === f ? `inset 0 -2px 0 ${f === "questions" ? "var(--question)" : "var(--core)"}` : "none", fontSize: 12 }}>
-                {l}
-                <br />
-                <span className="mono" style={{ fontSize: 11, color: f === "questions" && lists.questions.length ? "var(--question)" : "var(--muted)" }}>{lists[f].length}</span>
-              </button>
-            ))}
-          </div>
-          <ol style={{ listStyle: "none", margin: 0, padding: 0, overflowY: "auto", flex: "1 1 auto" }}>
-            {items.length === 0 && (
-              <li className="muted" style={{ padding: 14, lineHeight: 1.5 }}>
-                {filter === "questions" ? "Питань немає. Можна слухати результат або йти до експорту." : filter === "mine" ? "Виділіть шматок на хвилі або слова й натисніть C, щоб вирізати." : "Порожньо."}
-              </li>
+        <div style={{ flex: "1 1 auto", minWidth: 0, display: "flex", flexDirection: "column" }}>
+          <div ref={area} style={{ flex: "1 1 auto", display: "flex", minHeight: 0, overflow: "hidden", position: "relative" }}>
+            {!tl ? (
+              <div style={{ padding: 20 }}><EngineBanner />{err ? <div className="banner error">{err}</div> : <span className="muted">Завантажую епізод…</span>}</div>
+            ) : (
+              <>
+                <TrackHeaders height={size.h} showSpec={showSpec} onToggleSpec={() => setShowSpec((s) => !s)} clipsCount={tl.sources.length} chain={tl.chain.filter((c) => c.enabled).length} />
+                <TimelineCanvas tl={tl} pieces={pieces} clips={clips} assets={assets} view={view} width={width} height={size.h} tool={tool} sel={sel} splits={splits}
+                  playhead={T} showSpec={showSpec} onView={changeView} onSelect={setSel} onSeek={seek}
+                  onSplit={(t) => setSplits((s) => [...s, t].sort((a, b) => a - b))}
+                  onMarkerMove={(i, t) => saveMarkers(tl.chapters.map((c, k) => ({ time: k === i ? t : c.time, title: c.title })))}
+                  onMarkerAdd={addMarker} />
+              </>
             )}
-            {items.map((e) => {
-              const on = selected?.id === e.id;
-              return (
-                <li key={e.id}>
-                  <button onClick={() => focusEdit(e)} aria-current={on || undefined}
-                    style={{ width: "100%", textAlign: "left", display: "grid", gridTemplateColumns: "58px 1fr auto", gap: 8, alignItems: "baseline", padding: "8px 12px", border: 0, borderBottom: "1px solid #1c1f1c", background: on ? "var(--sel-row)" : "transparent", boxShadow: on ? "inset 2px 0 0 var(--core)" : "none" }}>
-                    <span className="mono" style={{ fontSize: 11, color: e.status === "suggested" ? "var(--question)" : "var(--text2)" }}>{fmtShort(e.episode_time)}</span>
-                    <span style={{ minWidth: 0 }}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-                        <i style={{ width: 8, height: 8, background: colorOf(e), flex: "0 0 auto" }} />
-                        {KIND_LABEL[e.kind] ?? e.kind}
-                      </span>
-                      {e.text && <span className="muted" style={{ display: "block", fontSize: 11.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.text}</span>}
-                    </span>
-                    <span className="mono" style={{ fontSize: 10, color: "var(--muted)" }}>{e.status === "accepted" ? "✂" : e.status === "rejected" ? "↺" : "?"}</span>
-                  </button>
-                </li>
-              );
-            })}
-          </ol>
-        </aside>
-
-        {/* ---- lanes ---- */}
-        <main ref={area} style={{ flex: "1 1 auto", minWidth: 0, display: "flex", flexDirection: "column", overflowY: "auto", overflowX: "hidden" }}>
-          <EngineBanner />
-          {err && <div className="banner error" role="alert" style={{ margin: 8 }}>{err}</div>}
-          {!tl ? (
-            <div className="muted" style={{ padding: 20 }}>Завантажую епізод…</div>
-          ) : (
-            <>
-              <div style={{ display: "flex" }}>
-                <div style={{ flex: `0 0 ${LABEL_W}px`, height: OVERVIEW_H, background: "var(--panel)", borderRight: "1px solid var(--border)", borderBottom: "1px solid var(--border)", padding: "6px 10px", fontSize: 11 }} className="muted">
-                  Огляд
-                </div>
-                <Overview tl={tl} assets={assets} view={view} width={width} onView={changeView} />
-              </div>
-              <div style={{ display: "flex" }}>
-                <div style={{ flex: `0 0 ${LABEL_W}px`, background: "var(--panel)", borderRight: "1px solid var(--border)" }}>
-                  {layout.map((l) => (
-                    <div key={l.key} style={{ height: l.h, padding: l.h > 30 ? "6px 10px" : "4px 10px", borderBottom: "1px solid var(--border)", overflow: "hidden" }}>
-                      <div style={{ fontWeight: 500, color: "var(--bright)", fontSize: 12 }}>{l.name}</div>
-                      {l.h > 30 && <div className="muted" style={{ fontSize: 10.5 }}>{l.sub}</div>}
-                    </div>
-                  ))}
-                </div>
-                <Lanes tl={tl} layout={layout} assets={assets} view={view} width={width} sel={sel} playheadX={pos ? xOf(pos.sid, pos.t) : null}
-                  onView={changeView} onSelect={setSel} onSeek={seek}
-                  onAdjust={(id, start, end) => run({ op: "adjust", id, start, end })} />
-              </div>
-              <div className="muted" style={{ padding: "8px 12px", fontSize: 11.5, lineHeight: 1.6, minHeight: 0 }}>
-                Клік — поставити курсор · тягнути по хвилі або спектру — виділити · клік по слову (Shift — розширити) · тягнути край правки — змінити межі ·
-                Ctrl + колесо — масштаб · колесо — прокрутка · Пробіл — слухати · C — вирізати · Y / N — вирізати / залишити · ↑ ↓ — по правках · Ctrl+Z — скасувати
-              </div>
-            </>
-          )}
-        </main>
+            {err && tl && <div className="banner error" role="alert" style={{ position: "absolute", left: HEAD_W + 12, right: 12, bottom: 12 }}>{err}</div>}
+          </div>
+          <div style={{ flex: `0 0 ${OVERVIEW_H + 1}px`, display: "flex", borderTop: "1px solid var(--border)", background: "var(--panel)" }}>
+            <div style={{ flex: `0 0 ${HEAD_W}px`, padding: "7px 10px", borderRight: "1px solid var(--border)", fontSize: 12 }}>
+              <div style={{ color: "var(--bright)" }}>Увесь епізод</div>
+              <div className="mono muted" style={{ fontSize: 10.5 }}>{fmtEp(length)} · було {fmtEp(recorded)}</div>
+            </div>
+            {tl && <Overview tl={tl} pieces={pieces} assets={assets} view={view} width={width} onView={changeView} />}
+          </div>
+        </div>
 
         {/* ---- inspector ---- */}
-        <aside aria-label="Інспектор" style={{ flex: "0 0 300px", minWidth: 0, background: "var(--panel)", borderLeft: "1px solid var(--border)", padding: 14, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
-          {tl && selected && <EditInspector tl={tl} e={selected} busy={busy} onDecide={decide} onNudge={nudge}
-            onSnap={(e) => run({ op: "adjust", id: e.id, snap: "both" })}
-            onDelete={(e) => run({ op: "delete", id: e.id }, () => setSel(null))}
-            onListen={() => listen(selected.source, selected.start, selected.end)} />}
-          {tl && sel && sel.kind !== "edit" && (
-            <SelectionInspector tl={tl} sel={sel} busy={busy} onCut={cutSelection}
-              onListen={() => {
-                const a = sel.kind === "range" ? Math.min(sel.a, sel.b) : tl.words[sel.source][Math.min(sel.i0, sel.i1)][1];
-                const b = sel.kind === "range" ? Math.max(sel.a, sel.b) : tl.words[sel.source][Math.max(sel.i0, sel.i1)][2];
-                const pl = player.current;
-                pl?.pause();
-                pl?.play({ sid: sel.source, t: a }, { sid: sel.source, t: b });
-              }} />
+        <aside aria-label="Інспектор" className="panel" style={{ flex: "0 0 300px", borderLeft: "1px solid var(--border)", padding: 14, display: "flex", flexDirection: "column", gap: 12, overflowY: "auto" }}>
+          {splice && (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <i style={{ width: 10, height: 10, background: splice.kinds.every((k) => k === "pause") ? "#8b8f8b" : "var(--cut)" }} />
+                <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Стик · {spliceLabel(splice.kinds)}</h2>
+                <span className="chip" style={{ marginLeft: "auto" }}>{splice.kinds.includes("manual") ? "мій" : "авто"}</span>
+              </div>
+              <div style={{ color: "var(--text2)", lineHeight: 1.5 }}>
+                Вирізано <span className="mono" style={{ color: "var(--bright)" }}>{splice.removed.toFixed(2)} с</span> на {fmtEp(splice.episode_time)}.
+                {spliceEdits.map((e) => reasonUk(e.reason)).filter(Boolean).slice(0, 2).map((r) => <span key={r}> {r}</span>)}
+              </div>
+              <div style={{ position: "relative", height: 96, border: "1px solid var(--border)" }}>
+                <canvas ref={close} style={{ display: "block", width: "100%", height: 94 }} aria-label="Стик крупно" role="img" />
+                <div aria-hidden="true" style={{ position: "absolute", top: 0, bottom: 0, left: "50%", width: 1, background: "var(--cut)" }} />
+                <span className="mono muted" style={{ position: "absolute", right: 6, bottom: 4, fontSize: 10 }}>кросфейд {auto?.crossfade_ms ?? 40} мс</span>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button className="iconbtn" style={{ width: 44, height: 42 }} aria-label="Прослухати стик" title="2 с до і після" onClick={() => play(Math.max(0, splice.episode_time - 2), splice.episode_time + 2)}>
+                  <svg width="12" height="12" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M3 2l9 5-9 5z" /></svg>
+                </button>
+                <button className="btn" style={{ flex: 1, height: 42, fontWeight: 600 }} disabled={busy} onClick={restore}>Відновити вирізане</button>
+              </div>
+              {leftEdit && rightEdit && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <h3 className="section-title" style={{ fontSize: 11 }}>Точка стику</h3>
+                  <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 1fr", gap: 6, alignItems: "center" }}>
+                    <span className="muted" style={{ fontSize: 12 }}>Ліва</span>
+                    <button className="btn" style={{ height: 28 }} disabled={busy} title="Вирізати ще 10 мс зліва" onClick={() => run({ op: "adjust", id: leftEdit.id, start: leftEdit.start - 0.01 })}>−10 мс</button>
+                    <button className="btn" style={{ height: 28 }} disabled={busy} title="Повернути 10 мс зліва" onClick={() => run({ op: "adjust", id: leftEdit.id, start: leftEdit.start + 0.01 })}>+10 мс</button>
+                    <span className="muted" style={{ fontSize: 12 }}>Права</span>
+                    <button className="btn" style={{ height: 28 }} disabled={busy} title="Повернути 10 мс справа" onClick={() => run({ op: "adjust", id: rightEdit.id, end: rightEdit.end - 0.01 })}>−10 мс</button>
+                    <button className="btn" style={{ height: 28 }} disabled={busy} title="Вирізати ще 10 мс справа" onClick={() => run({ op: "adjust", id: rightEdit.id, end: rightEdit.end + 0.01 })}>+10 мс</button>
+                  </div>
+                  <button className="btn" style={{ height: 28 }} disabled={busy} onClick={() => { if (rightEdit.id === leftEdit.id) run({ op: "adjust", id: leftEdit.id, snap: "both" }); else { run({ op: "adjust", id: leftEdit.id, snap: "start" }); run({ op: "adjust", id: rightEdit.id, snap: "end" }); } }}>Посунути в тишу</button>
+                </div>
+              )}
+            </>
           )}
-          {tl && !sel && (
+
+          {sel?.kind === "range" && (
+            <>
+              <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Виділення</h2>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                <tbody>
+                  <Row k="Від" v={fmtEp(Math.min(sel.A, sel.B), true)} />
+                  <Row k="До" v={fmtEp(Math.max(sel.A, sel.B), true)} />
+                  <Row k="Тривалість" v={`${Math.abs(sel.B - sel.A).toFixed(2)} с`} />
+                </tbody>
+              </table>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button className="iconbtn" style={{ width: 44, height: 42 }} aria-label="Прослухати виділене" onClick={() => play(Math.min(sel.A, sel.B), Math.max(sel.A, sel.B))}>
+                  <svg width="12" height="12" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M3 2l9 5-9 5z" /></svg>
+                </button>
+                <button className="btn cut big" style={{ flex: 1 }} disabled={busy || Math.abs(sel.B - sel.A) < 0.02} onClick={() => cutRange(sel.A, sel.B)} title="Delete">Вирізати (Delete)</button>
+              </div>
+              <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>Вирізане одразу закривається (ripple).{snap ? " Межі зсунуться в найтихіше місце поруч." : ""}</div>
+            </>
+          )}
+
+          {sel?.kind === "marker" && tl?.chapters[sel.i] && (
+            <>
+              <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Маркер · розділ</h2>
+              <label className="field"><span>Назва</span>
+                <input className="input" value={markerTitle} onChange={(e) => setMarkerTitle(e.target.value)}
+                  onBlur={() => markerTitle.trim() && markerTitle !== tl.chapters[sel.i].title && saveMarkers(tl.chapters.map((c, k) => ({ time: c.time, title: k === sel.i ? markerTitle.trim() : c.title })))}
+                  onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+              </label>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}><tbody><Row k="Час" v={fmtEp(tl.chapters[sel.i].time)} /></tbody></table>
+              <div className="muted" style={{ fontSize: 12 }}>Перетягніть маркер, щоб посунути. Подвійний клік по смузі маркерів або M — новий маркер.</div>
+              <button className="btn" style={{ color: "var(--cut-text)" }} disabled={busy} onClick={() => { saveMarkers(tl.chapters.filter((_, k) => k !== sel.i).map((c) => ({ time: c.time, title: c.title }))); setSel(null); }}>Видалити маркер</button>
+            </>
+          )}
+
+          {!sel && tl && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10, lineHeight: 1.55 }}>
-              <h2 className="section-title">Як редагувати</h2>
-              <div className="muted">Виберіть правку ліворуч або на доріжці «Правки», щоб прослухати її, вирізати чи залишити, або посунути межі.</div>
-              <div className="muted">Щоб вирізати своє — виділіть шматок на хвилі чи спектрі, або слова на доріжці «Слова», і натисніть <b style={{ color: "var(--text)" }}>C</b>.</div>
-              <div className="muted">«Результат» — слухати з вирізаним, «Оригінал» — усе як записано.</div>
+              <h2 className="section-title">Епізод</h2>
+              <div className="muted" style={{ fontSize: 12.5 }}>
+                Клікніть стик на доріжці, щоб прослухати чи відновити вирізане. «Діапазон» (R) — виділити й видалити шматок, «Лезо» (B) — розрізати й видалити сегмент. ← → — по стиках, M — маркер, L — цикл.
+              </div>
             </div>
           )}
-          {tl && (
-            <div style={{ marginTop: "auto", borderTop: "1px solid var(--border)", paddingTop: 10 }}>
-              <h2 className="section-title" style={{ marginBottom: 6 }}>Ланцюжок обробки</h2>
-              {tl.chain.map((c) => (
-                <div key={c.module} className="mono" style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "3px 0", color: c.enabled ? "var(--text2)" : "var(--muted)" }}>
-                  <span>{c.module}</span>
-                  <span className="muted">{c.module === "loudness" ? `${c.params.target_lufs} LUFS` : c.enabled ? "on" : "off"}</span>
-                </div>
+
+          <div style={{ marginTop: "auto", borderTop: "1px solid var(--border)", paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+            <h3 className="section-title" style={{ fontSize: 11 }}>Гучність епізоду</h3>
+            <div className="mono" style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }} title={m ? "Виміряно на останньому рендері" : "З'явиться після першого експорту"}>
+              {([["INT", m?.integrated_lufs], ["LRA", m?.lra_lu], ["TP", m?.true_peak_dbtp]] as [string, number | undefined][]).map(([k, v]) => (
+                <div key={k}><div className="muted" style={{ fontSize: 10 }}>{k}</div><div style={{ fontSize: 17, color: "var(--bright)" }}>{v?.toFixed(1) ?? "—"}</div></div>
               ))}
             </div>
-          )}
+            <Link href="/export/" className="btn primary" style={{ height: 40, display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", marginTop: 4 }}>До експорту</Link>
+          </div>
         </aside>
       </div>
     </div>
@@ -468,98 +485,36 @@ export default function EditPage() {
 function Row({ k, v }: { k: string; v: string }) {
   return (
     <tr>
-      <td className="muted" style={{ padding: "4px 0", fontSize: 12 }}>{k}</td>
-      <td className="mono" style={{ padding: "4px 0", textAlign: "right", fontSize: 12, color: "var(--bright)" }}>{v}</td>
+      <td className="muted" style={{ padding: "4px 0" }}>{k}</td>
+      <td className="mono" style={{ padding: "4px 0", textAlign: "right", color: "var(--bright)" }}>{v}</td>
     </tr>
   );
 }
 
-function EditInspector({ tl, e, busy, onDecide, onNudge, onSnap, onDelete, onListen }: {
-  tl: Timeline; e: TlEdit; busy: boolean;
-  onDecide: (e: TlEdit, cut: boolean) => void; onNudge: (e: TlEdit, edge: "start" | "end", ms: number) => void;
-  onSnap: (e: TlEdit) => void; onDelete: (e: TlEdit) => void; onListen: () => void;
-}) {
-  const src = tl.sources.find((s) => s.id === e.source);
-  const state = e.status === "suggested" ? "Питання" : e.status === "accepted" ? (e.type === "cut" ? "Вирізано" : "Застосовано") : "Залишено";
-  const yes = e.type === "cut" ? "Вирізати" : e.type === "pause" ? "Скоротити" : e.type === "gain" ? "Приглушити" : "Заповнити";
-  const no = e.type === "cut" ? "Залишити" : "Не чіпати";
+function TrackHeaders({ height, showSpec, onToggleSpec, clipsCount, chain }: { height: number; showSpec: boolean; onToggleSpec: () => void; clipsCount: number; chain: number }) {
+  const spec = showSpec ? 140 : 0;
+  const track = Math.max(140, height - 26 - 28 - spec - 60);
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <i style={{ width: 10, height: 10, background: colorOf(e) }} />
-        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>{KIND_LABEL[e.kind] ?? e.kind}</h2>
-        <span className="chip" style={{ marginLeft: "auto", color: e.status === "suggested" ? "var(--question)" : "var(--text2)" }}>{state}</span>
+    <div style={{ flex: `0 0 ${HEAD_W}px`, background: "var(--panel)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column" }}>
+      <div style={{ height: 26, borderBottom: "1px solid var(--border)" }} />
+      <div style={{ height: 28, borderBottom: "1px solid var(--border)", padding: "0 10px", display: "flex", alignItems: "center", fontSize: 12, color: "var(--text2)" }}>Маркери · розділи</div>
+      <div style={{ height: track, borderBottom: "1px solid var(--border)", padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span className="mono" style={{ fontSize: 11, color: "var(--core)" }}>A1</span><span style={{ fontWeight: 600, color: "var(--bright)" }}>Голос</span></div>
+        <div className="mono muted" style={{ fontSize: 11 }}>0.0 dB · стерео</div>
+        <div className="muted" style={{ fontSize: 11, lineHeight: 1.5 }}>{clipsCount} кліпів<br />обробка: {chain} модулів</div>
       </div>
-      {reasonUk(e.reason) && <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>{reasonUk(e.reason)}</div>}
-      {(e.text || e.before || e.after) && (
-        <div style={{ lineHeight: 1.55, padding: 10, background: "var(--lane)", border: "1px solid var(--border)" }}>
-          <span className="muted">…{e.before} </span>
-          <mark style={{ background: e.status === "suggested" ? "#3a2e10" : "#3a1414", color: e.status === "suggested" ? "#ffd99a" : "#ffb3b3", padding: "0 3px", textDecoration: e.status === "accepted" ? "line-through" : "none" }}>{e.text || "[без слів]"}</mark>
-          <span className="muted"> {e.after}…</span>
+      {showSpec && (
+        <div style={{ height: 140, borderBottom: "1px solid var(--border)", padding: "8px 10px", fontSize: 12 }}>
+          <div style={{ color: "var(--bright)", fontWeight: 500 }}>Спектр A1</div>
+          <div className="muted" style={{ fontSize: 11 }}>60 Гц – 12 кГц</div>
+          <button className="btn" style={{ height: 24, fontSize: 11, marginTop: 8, padding: "0 8px" }} onClick={onToggleSpec}>Сховати</button>
         </div>
       )}
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <tbody>
-          <Row k="У епізоді" v={fmtShort(e.episode_time)} />
-          <Row k="Файл" v={src?.name.replace(/\.wav$/i, "") ?? e.source} />
-          <Row k="Діапазон" v={`${e.start.toFixed(3)}–${e.end.toFixed(3)}`} />
-          <Row k="Тривалість" v={`${(e.end - e.start).toFixed(3)} с`} />
-          {e.type === "gain" && <Row k="Приглушення" v={`${e.db} dB`} />}
-          {e.type === "pause" && <Row k="Скоротити до" v={`${e.target} с`} />}
-        </tbody>
-      </table>
-      <div style={{ display: "flex", gap: 6 }}>
-        <button className="btn" style={{ width: 44, height: 44, padding: 0 }} aria-label="Прослухати" title="Прослухати з 2 с до і після" onClick={onListen}>
-          <svg width="12" height="12" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M3 2l9 5-9 5z" /></svg>
-        </button>
-        <button className={`btn big ${e.status === "accepted" ? "cut" : ""}`} style={{ flex: "1 1 0", outline: e.status === "accepted" ? "1px solid var(--cut)" : undefined, background: e.status !== "accepted" && e.type === "cut" ? "var(--cut-bg)" : undefined, color: e.type === "cut" ? "var(--cut-text)" : undefined }} title="Клавіша Y" disabled={busy} onClick={() => onDecide(e, true)}>{yes}</button>
-        <button className="btn big" style={{ flex: "1 1 0", outline: e.status === "rejected" ? "1px solid var(--text2)" : undefined }} title="Клавіша N" disabled={busy} onClick={() => onDecide(e, false)}>{no}</button>
+      <div style={{ height: 60, borderBottom: "1px solid var(--border)", padding: "8px 10px", fontSize: 12, display: "flex", flexDirection: "column" }}>
+        <div style={{ color: "var(--bright)", fontWeight: 500 }}>Гучність</div>
+        <div className="muted" style={{ fontSize: 11 }}>ST 3 с · ціль −16</div>
+        {!showSpec && <button className="btn" style={{ height: 20, fontSize: 10.5, padding: "0 6px", marginTop: 2, alignSelf: "flex-start" }} onClick={onToggleSpec}>Показати спектр</button>}
       </div>
-      {e.type === "cut" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <h3 className="section-title">Межі</h3>
-          {(["start", "end"] as const).map((edge) => (
-            <div key={edge} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span className="muted" style={{ width: 62, fontSize: 12 }}>{edge === "start" ? "Початок" : "Кінець"}</span>
-              <button className="btn" style={{ flex: 1, height: 30 }} disabled={busy} onClick={() => onNudge(e, edge, -10)}>−10 мс</button>
-              <button className="btn" style={{ flex: 1, height: 30 }} disabled={busy} onClick={() => onNudge(e, edge, +10)}>+10 мс</button>
-            </div>
-          ))}
-          <button className="btn" style={{ height: 30 }} disabled={busy} onClick={() => onSnap(e)} title="Посунути обидві межі в найтихіше місце поруч">До тиші</button>
-          {e.kind === "manual" && <button className="btn" style={{ height: 30, color: "var(--cut-text)" }} disabled={busy} onClick={() => onDelete(e)}>Видалити мій різ</button>}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SelectionInspector({ tl, sel, busy, onCut, onListen }: { tl: Timeline; sel: Exclude<Sel, null>; busy: boolean; onCut: () => void; onListen: () => void }) {
-  if (sel.kind === "edit") return null;
-  const src = tl.sources.find((s) => s.id === sel.source);
-  const ws = tl.words[sel.source] ?? [];
-  const a = sel.kind === "range" ? Math.min(sel.a, sel.b) : ws[Math.min(sel.i0, sel.i1)]?.[1] ?? 0;
-  const b = sel.kind === "range" ? Math.max(sel.a, sel.b) : ws[Math.max(sel.i0, sel.i1)]?.[2] ?? 0;
-  const text = selectionText(tl, sel);
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Виділення</h2>
-      <div style={{ lineHeight: 1.55, padding: 10, background: "var(--lane)", border: "1px solid var(--border)", minHeight: 40 }}>
-        {text || <span className="muted">[без слів]</span>}
-      </div>
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
-        <tbody>
-          <Row k="Файл" v={src?.name.replace(/\.wav$/i, "") ?? sel.source} />
-          <Row k="Від – до" v={`${a.toFixed(2)} – ${b.toFixed(2)}`} />
-          <Row k="Тривалість" v={`${(b - a).toFixed(2)} с`} />
-        </tbody>
-      </table>
-      <div style={{ display: "flex", gap: 6 }}>
-        <button className="btn" style={{ width: 44, height: 44, padding: 0 }} aria-label="Прослухати виділене" onClick={onListen}>
-          <svg width="12" height="12" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M3 2l9 5-9 5z" /></svg>
-        </button>
-        <button className="btn big cut" style={{ flex: 1 }} disabled={busy || b - a < 0.02} onClick={onCut} title="Клавіша C">Вирізати</button>
-      </div>
-      <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>Межі різу самі зсуваються в найтихіше місце поруч, щоб стик не було чути.</div>
     </div>
   );
 }

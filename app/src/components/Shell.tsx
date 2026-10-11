@@ -3,17 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { engine, type Health } from "@/lib/engine";
+import { currentProject, engine, type Health } from "@/lib/engine";
 
-type EngineState = { health: Health | null; error: string | null };
-const EngineCtx = createContext<EngineState>({ health: null, error: null });
+type EngineState = { health: Health | null; error: string | null; mcpSeen: number | null };
+const EngineCtx = createContext<EngineState>({ health: null, error: null, mcpSeen: null });
 export const useEngine = () => useContext(EngineCtx);
-
-const STAGES = [
-  { href: "/import/", label: "Імпорт" },
-  { href: "/edit/", label: "Редагування" },
-  { href: "/export/", label: "Експорт" },
-];
 
 function Logo() {
   return (
@@ -26,18 +20,40 @@ function Logo() {
   );
 }
 
+/** Project name + path of the open project, kept in sync across pages. */
+export function useCurrentProject(): { path: string | null; name: string | null } {
+  const [p, setP] = useState<{ path: string | null; name: string | null }>({ path: null, name: null });
+  useEffect(() => {
+    const read = () => setP({ path: currentProject.get(), name: currentProject.name() });
+    read();
+    window.addEventListener("holos-project", read);
+    window.addEventListener("storage", read);
+    return () => {
+      window.removeEventListener("holos-project", read);
+      window.removeEventListener("storage", read);
+    };
+  }, []);
+  return p;
+}
+
+const MCP_FRESH_S = 6 * 3600;
+
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname() ?? "/";
-  const [state, setState] = useState<EngineState>({ health: null, error: null });
+  const [state, setState] = useState<EngineState>({ health: null, error: null, mcpSeen: null });
+  const project = useCurrentProject();
 
   useEffect(() => {
     let alive = true;
+    let n = 0;
+    let mcpSeen: number | null = null;
     const tick = async () => {
       try {
         const h = await engine.health();
-        if (alive) setState({ health: h, error: null });
+        if (n++ % 6 === 0) mcpSeen = (await engine.settings().catch(() => null))?.mcp_last_seen ?? mcpSeen;
+        if (alive) setState({ health: h, error: null, mcpSeen });
       } catch (e) {
-        if (alive) setState({ health: null, error: e instanceof Error ? e.message : String(e) });
+        if (alive) setState((s) => ({ ...s, health: null, error: e instanceof Error ? e.message : String(e) }));
       }
     };
     tick();
@@ -49,34 +65,47 @@ export function Shell({ children }: { children: ReactNode }) {
   }, []);
 
   const h = state.health;
-  const gpu = !h?.asr ? "ASR не встановлено" : h.cuda_devices ? "GPU · CUDA" : h.cuda_devices === 0 ? "CPU" : "ASR";
+  const gpu = !h?.asr ? "розпізнавання не встановлено" : h.cuda_devices ? "GPU · CUDA" : h.cuda_devices === 0 ? "CPU" : "готовий";
+  const inProject = Boolean(project.path) && (path.startsWith("/edit") || path.startsWith("/export") || path.startsWith("/automation"));
+  const claudeOn = state.mcpSeen !== null && Date.now() / 1000 - state.mcpSeen < MCP_FRESH_S;
 
   return (
     <EngineCtx.Provider value={state}>
       <div className="app">
         <header className="titlebar">
-          <span className="brand">
+          <Link href="/" className="brand" style={{ textDecoration: "none" }} title="Усі проєкти">
             <Logo />
-            Holos Studio
-          </span>
-          <nav aria-label="Етапи">
-            {STAGES.map((s) => (
-              <Link key={s.href} href={s.href} aria-current={path.startsWith(s.href.slice(0, -1)) ? "page" : undefined}>
-                {s.label}
-              </Link>
-            ))}
-          </nav>
-          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6 }} className="muted">
-            <span className={`dot ${h ? "ok" : "bad"}`} aria-hidden="true" />
-            {h ? `engine ${h.version} · ${gpu}` : "engine не запущено"}
+            {inProject ? <span style={{ color: "var(--text2)", fontWeight: 400 }}>Проєкти</span> : "Holos Studio"}
+          </Link>
+          {inProject && (
+            <>
+              <span style={{ color: "var(--dim)" }} aria-hidden="true">/</span>
+              <span style={{ fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 380 }}>{project.name ?? "Проєкт"}</span>
+              <nav aria-label="Етапи">
+                <Link href="/edit/" aria-current={path.startsWith("/edit") || path.startsWith("/automation") ? "page" : undefined}>Редактор</Link>
+                <Link href="/export/" aria-current={path.startsWith("/export") ? "page" : undefined}>Експорт</Link>
+              </nav>
+            </>
+          )}
+          <span style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16, fontSize: 12 }} className="muted">
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }} title={h ? `рушій ${h.version}` : state.error ?? ""}>
+              <span className={`dot ${h ? "ok" : "bad"}`} aria-hidden="true" />
+              {h ? `рушій · ${gpu}` : "рушій не запущено"}
+            </span>
+            <Link href="/settings/" style={{ display: "flex", alignItems: "center", gap: 6, textDecoration: "none", color: "inherit" }}
+              title={claudeOn ? "Claude підключено через MCP" : "Як підключити Claude"}>
+              <span className={`dot ${claudeOn ? "ok" : ""}`} aria-hidden="true" />
+              {claudeOn ? "Claude · MCP" : "Claude не підключено"}
+            </Link>
+            <Link href="/settings/" aria-label="Налаштування" title="Налаштування" style={{ display: "flex", color: "var(--text2)" }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" />
+              </svg>
+            </Link>
           </span>
         </header>
         {children}
-        <footer className="statusbar">
-          <span>{h?.ffmpeg ? "ffmpeg ✓" : "ffmpeg —"}</span>
-          <span>{h?.asr ? "розпізнавання мови ✓" : "розпізнавання мови —"}</span>
-          <span style={{ marginLeft: "auto" }}>Holos Studio 0.1.0</span>
-        </footer>
       </div>
     </EngineCtx.Provider>
   );
@@ -87,7 +116,7 @@ export function EngineBanner() {
   if (health) return null;
   return (
     <div className="banner error" role="alert">
-      Немає зв'язку з engine{error ? ` (${error})` : ""}. Запустіть у терміналі:{" "}
+      Немає зв&apos;язку з рушієм{error ? ` (${error})` : ""}. Якщо ви запускаєте з терміналу:{" "}
       <code className="mono">cd engine; uv run holos serve --dev</code>
     </div>
   );

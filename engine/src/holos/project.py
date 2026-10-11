@@ -125,6 +125,10 @@ class Automation(BaseModel):
         "fragment": "keep", "sound": "keep", "unclear": "keep"})
     fill_dropouts: bool = True
     level_match: bool = True
+    crossfade_ms: float = 40.0      # at every splice
+    target_lufs: float = -16.0      # podcast −16 · YouTube −14 · broadcast −23
+    voice: dict[str, bool] = Field(default_factory=lambda: {
+        "highpass": True, "declick": True, "eq": True, "deess": True, "compressor": True})
 
 
 class ChainStep(BaseModel):
@@ -211,6 +215,9 @@ class Project(BaseModel):
                     e.touched = True
             self.automation.kinds.update({k: ("cut" if k in self.auto_apply else "keep")
                                           for k in ("repeat", "retake", "filler")})
+            loud = next((c for c in self.chain if c.module == "loudness"), None)
+            if loud is not None:
+                self.automation.target_lufs = float(loud.params.get("target_lufs", -16.0))
             apply(self)
         self.version = PROJECT_VERSION
 

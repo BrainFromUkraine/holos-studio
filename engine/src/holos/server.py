@@ -451,10 +451,7 @@ def create_app(token: str | None = None) -> FastAPI:
     def put_defaults(body: DefaultsIn) -> dict:
         from .project import Automation
         a = Automation.model_validate(body.automation).model_dump()
-        st = templates_mod.load_state()
-        st["automation"] = a
-        templates_mod._state_path().parent.mkdir(parents=True, exist_ok=True)
-        templates_mod._state_path().write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
+        templates_mod.update_state(lambda st: st.__setitem__("automation", a))
         return a
 
     @app.get("/api/settings", dependencies=[Depends(auth)])
@@ -462,7 +459,22 @@ def create_app(token: str | None = None) -> FastAPI:
         from . import projects as P
         st = templates_mod.load_state()
         return {"projects_dir": str(P.projects_root()), "home": str(templates_mod.home()),
-                "templates_dir": str(templates_mod.home() / "templates"), "mcp_last_seen": st.get("mcp_last_seen")}
+                "templates_dir": str(templates_mod.home() / "templates"), "mcp_last_seen": st.get("mcp_last_seen"),
+                "mcp_config": mcp_config(), "version": __version__}
+
+    def mcp_config() -> dict:
+        """Ready-to-paste entry for Claude Desktop's claude_desktop_config.json: this very engine, `holos mcp`."""
+        import shutil
+        import sys
+        bindir = Path(sys.executable).parent
+        exe = next((str(c) for c in (bindir / "holos.exe", bindir / "holos") if c.is_file()), None) or shutil.which("holos")
+        entry: dict[str, Any] = {"command": exe or "holos", "args": ["mcp"]}
+        from .io import FFmpegError, ffmpeg_path
+        try:
+            entry["env"] = {"HOLOS_FFMPEG": ffmpeg_path()}
+        except FFmpegError:
+            pass
+        return {"mcpServers": {"holos-studio": entry}}
 
     @app.put("/api/settings", dependencies=[Depends(auth)])
     def put_settings(body: SettingsIn) -> dict:

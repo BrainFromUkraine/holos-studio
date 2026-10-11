@@ -52,6 +52,7 @@ def _restore(p: Project, snap: dict) -> None:
         p.analysis_settings.pause_max = p.automation.pause_max
         p.analysis_settings.pause_target = p.automation.pause_target
         p.analysis_settings.breath_db = p.automation.breath_db
+        p.timeline_settings.crossfade = max(0.005, min(0.25, p.automation.crossfade_ms / 1000))
     if "chain" in snap:
         p.chain = [ChainStep.model_validate(c) for c in snap["chain"]]
 

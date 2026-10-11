@@ -44,15 +44,15 @@ _lock = threading.Lock()
 
 
 def _seen() -> None:
-    """Let the app show "Claude connected"."""
-    try:
-        st = T.load_state()
-        st["mcp_last_seen"] = time.time()
-        T._state_path().parent.mkdir(parents=True, exist_ok=True)
-        import json
-        T._state_path().write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding="utf-8")
-    except OSError:
-        pass
+    """Let the app show "Claude connected" (written at most once a minute)."""
+    now = time.time()
+
+    def fn(st: dict):
+        if now - (st.get("mcp_last_seen") or 0) < 60:
+            return False
+        st["mcp_last_seen"] = now
+
+    T.update_state(fn)
 
 
 def _load(path: str) -> Project:

@@ -33,6 +33,16 @@ export type TlEdit = {
 
 export type Word = [string, number, number, number]; // text, start, end, probability
 
+export type Splice = {
+  source: string;
+  start: number; // removed range in the recording
+  end: number;
+  removed: number;
+  edits: string[];
+  kinds: string[];
+  episode_time: number;
+};
+
 export type Timeline = {
   name: string;
   sample_rate: number;
@@ -43,6 +53,8 @@ export type Timeline = {
   sources: TlSource[];
   edits: TlEdit[];
   words: Record<string, Word[]>;
+  splices: Splice[];
+  automation: import("./engine").Automation;
   chapters: { title: string; time: number; end: number }[];
   target_lufs: number | null;
   chain: { module: string; enabled: boolean; params: Record<string, unknown> }[];

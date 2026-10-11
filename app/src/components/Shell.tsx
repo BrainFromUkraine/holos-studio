@@ -3,10 +3,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { currentProject, engine, type Health } from "@/lib/engine";
+import { EngineSetup } from "@/components/EngineSetup";
+import { UpdateBanner } from "@/components/UpdateBanner";
+import { currentProject, engine, setEngineConnection, type Health } from "@/lib/engine";
+import { engineUsable, useEngineInfo } from "@/lib/engineHost";
 
-type EngineState = { health: Health | null; error: string | null; mcpSeen: number | null };
-const EngineCtx = createContext<EngineState>({ health: null, error: null, mcpSeen: null });
+type EngineState = { health: Health | null; error: string | null; mcpSeen: number | null; packaged: boolean };
+const EngineCtx = createContext<EngineState>({ health: null, error: null, mcpSeen: null, packaged: false });
 export const useEngine = () => useContext(EngineCtx);
 
 function Logo() {
@@ -40,10 +43,15 @@ const MCP_FRESH_S = 6 * 3600;
 
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname() ?? "/";
-  const [state, setState] = useState<EngineState>({ health: null, error: null, mcpSeen: null });
+  const info = useEngineInfo();
+  const usable = engineUsable(info);
+  // Packaged app: the shell started the engine on a free port with a token. Set before children render.
+  if (info.state === "ready") setEngineConnection(info.url, info.token);
+  const [state, setState] = useState<EngineState>({ health: null, error: null, mcpSeen: null, packaged: false });
   const project = useCurrentProject();
 
   useEffect(() => {
+    if (!usable) return;
     let alive = true;
     let n = 0;
     let mcpSeen: number | null = null;
@@ -51,7 +59,7 @@ export function Shell({ children }: { children: ReactNode }) {
       try {
         const h = await engine.health();
         if (n++ % 6 === 0) mcpSeen = (await engine.settings().catch(() => null))?.mcp_last_seen ?? mcpSeen;
-        if (alive) setState({ health: h, error: null, mcpSeen });
+        if (alive) setState({ health: h, error: null, mcpSeen, packaged: info.state === "ready" });
       } catch (e) {
         if (alive) setState((s) => ({ ...s, health: null, error: e instanceof Error ? e.message : String(e) }));
       }
@@ -62,7 +70,9 @@ export function Shell({ children }: { children: ReactNode }) {
       alive = false;
       clearInterval(t);
     };
-  }, []);
+  }, [usable, info.state, info.url, info.token]);
+
+  if (!usable) return <EngineSetup info={info} />;
 
   const h = state.health;
   const gpu = !h?.asr ? "розпізнавання не встановлено" : h.cuda_devices ? "GPU · CUDA" : h.cuda_devices === 0 ? "CPU" : "готовий";
@@ -72,6 +82,7 @@ export function Shell({ children }: { children: ReactNode }) {
   return (
     <EngineCtx.Provider value={state}>
       <div className="app">
+        <UpdateBanner />
         <header className="titlebar">
           <Link href="/" className="brand" style={{ textDecoration: "none" }} title="Усі проєкти">
             <Logo />
@@ -112,12 +123,12 @@ export function Shell({ children }: { children: ReactNode }) {
 }
 
 export function EngineBanner() {
-  const { health, error } = useEngine();
+  const { health, error, packaged } = useEngine();
   if (health) return null;
   return (
     <div className="banner error" role="alert">
-      Немає зв&apos;язку з рушієм{error ? ` (${error})` : ""}. Якщо ви запускаєте з терміналу:{" "}
-      <code className="mono">cd engine; uv run holos serve --dev</code>
+      Немає зв&apos;язку з рушієм{error ? ` (${error})` : ""}.{" "}
+      {packaged ? "Перезапустіть Holos Studio." : <>Запустіть його з терміналу: <code className="mono">cd engine; uv run holos serve --dev</code></>}
     </div>
   );
 }

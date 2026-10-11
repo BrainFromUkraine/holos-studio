@@ -37,12 +37,15 @@ Design decisions: [DESIGN.md](DESIGN.md) — automatic first, pro audio-tool lay
 - ✅ Export templates (plugins): video through your own script — [TEMPLATES.md](TEMPLATES.md)
 - ⬜ Loudness presets (podcast / YouTube / broadcast), FLAC, cover art and metadata
 
-## Milestone 3 — Windows installer 🟨
+## Milestone 3 — Desktop app 🟨
 
-- 🟨 Small installer (~100 MB); speech recognition and GPU libraries download on first run
-- 🟨 Engine started by the app in the background, no terminals
-- 🟨 Automatic updates from GitHub Releases
-- 🟨 Release builds on GitHub Actions
+Details: [RELEASING.md](RELEASING.md).
+
+- ✅ Tauri v2 shell manages the engine: Python environment created on first run with uv (progress screen), engine started hidden with a per-launch token, killed with the app
+- ✅ Windows installer (NSIS, per-user, Ukrainian / English) built and published by GitHub Actions
+- ✅ Auto-update from GitHub Releases (signed), one click
+- ✅ Claude Desktop MCP config for the installed engine
+- ⬜ GPU detection with CPU fallback, model download manager
 
 ## Milestone 4 — MCP ✅
 

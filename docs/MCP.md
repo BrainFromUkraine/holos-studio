@@ -26,6 +26,8 @@ Running from source, the configuration looks like this (adjust the path):
 }
 ```
 
+With the installed app the **Settings** screen already shows the right configuration for it.
+
 Any other MCP client: run `holos mcp` (or `uv --directory <repo>/engine run holos mcp`) over stdio.
 
 ## Tools

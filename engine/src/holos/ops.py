@@ -341,7 +341,7 @@ def export_project(path: str | Path, out_dir: str | Path | None = None, name: st
             _run_ffmpeg(args + ["-c:a", "libmp3lame", "-b:a", f"{ex.mp3_kbps}k", "-id3v2_version", "3", str(target)])
             files["mp3"] = str(target)
         if ex.chapters_txt and rows:
-            target = out / "таймкоди.txt"
+            target = out / "timecodes.txt"
             target.write_text(C.youtube_text(rows), encoding="utf-8")
             files["timecodes"] = str(target)
 

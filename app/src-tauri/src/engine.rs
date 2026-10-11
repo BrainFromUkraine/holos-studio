@@ -216,7 +216,7 @@ impl EngineManager {
 
     fn bring_up(&self, app: &AppHandle, generation: u64) -> Result<(), String> {
         let p = Paths::resolve(app)?;
-        fs::create_dir_all(&p.data).map_err(|e| format!("Не вдалося створити {}: {e}", show(&p.data)))?;
+        fs::create_dir_all(&p.data).map_err(|e| format!("Could not create the data folder ({}: {e})", show(&p.data)))?;
         if let Ok(file) = fs::File::create(p.data.join("engine.log")) {
             let mut g = self.lock();
             if g.generation == generation {
@@ -224,10 +224,10 @@ impl EngineManager {
             }
         }
         if !p.bundled_src.join("pyproject.toml").is_file() {
-            return Err(format!("У встановленні бракує коду engine ({}). Перевстановіть Holos Studio.", show(&p.bundled_src)));
+            return Err(format!("The installation is missing the engine code. Reinstall Holos Studio. ({})", show(&p.bundled_src)));
         }
 
-        let hash = hash_dir(&p.bundled_src).map_err(|e| format!("Не вдалося прочитати код engine: {e}"))?;
+        let hash = hash_dir(&p.bundled_src).map_err(|e| format!("Could not read the engine code ({e})"))?;
         if read_marker(&p) != Some(hash.clone()) || !p.holos().is_file() {
             self.setup(app, generation, &p, &hash)?;
         }
@@ -238,13 +238,13 @@ impl EngineManager {
     fn setup(&self, app: &AppHandle, generation: u64, p: &Paths, hash: &str) -> Result<(), String> {
         self.update(app, generation, |g| g.phase = Phase::Setup);
         if !p.uv.is_file() {
-            return Err(format!("Не знайдено uv ({}). Перевстановіть Holos Studio.", show(&p.uv)));
+            return Err(format!("uv not found. Reinstall Holos Studio. ({})", show(&p.uv)));
         }
         self.line(app, generation, format!("Holos engine {} → {}", &hash[..12], show(&p.data)), true);
 
         // Old marker goes first: if setup is interrupted, the next launch retries it.
         let _ = fs::remove_file(p.marker());
-        copy_dir(&p.bundled_src, &p.src()).map_err(|e| format!("Не вдалося скопіювати код engine: {e}"))?;
+        copy_dir(&p.bundled_src, &p.src()).map_err(|e| format!("Could not copy the engine code ({e})"))?;
 
         let mut cmd = Command::new(&p.uv);
         cmd.args(["sync", "--frozen", "--no-dev", "--compile-bytecode", "--color", "never"]);
@@ -265,23 +265,23 @@ impl EngineManager {
         let status = self.run_to_end(app, generation, cmd, true)?;
         if !status.success() {
             return Err(format!(
-                "Не вдалося підготувати engine (uv sync, код {}). Перевірте інтернет-з'єднання та вільне місце на диску (потрібно ~5 ГБ) і спробуйте ще раз.",
+                "Could not prepare the engine. Check the internet connection and free disk space. (uv sync exit code {}; about 5 GB is needed)",
                 status.code().map(|c| c.to_string()).unwrap_or_else(|| "?".into())
             ));
         }
         if !p.holos().is_file() {
-            return Err(format!("uv sync завершився, але {} не з'явився.", show(&p.holos())));
+            return Err(format!("Setup finished but the engine was not created. ({})", show(&p.holos())));
         }
         fs::write(p.marker(), serde_json::json!({ "hash": hash }).to_string())
-            .map_err(|e| format!("Не вдалося записати {}: {e}", show(&p.marker())))?;
-        self.line(app, generation, "Готово.".into(), true);
+            .map_err(|e| format!("Could not write the setup marker ({}: {e})", show(&p.marker())))?;
+        self.line(app, generation, "Done.".into(), true);
         Ok(())
     }
 
     /// Start `holos serve`, wait for /api/health, then watch the process until it exits or we restart.
     fn run_engine(&self, app: &AppHandle, generation: u64, p: &Paths) -> Result<(), String> {
         self.update(app, generation, |g| g.phase = Phase::Starting);
-        let port = free_port().map_err(|e| format!("Немає вільного порту на 127.0.0.1: {e}"))?;
+        let port = free_port().map_err(|e| format!("No free port on 127.0.0.1 ({e})"))?;
         let token = random_token()?;
 
         let mut cmd = Command::new(p.holos());
@@ -298,13 +298,13 @@ impl EngineManager {
         let deadline = Instant::now() + START_TIMEOUT;
         loop {
             if let Some(status) = self.poll_exit(generation)? {
-                return Err(format!("Engine зупинився під час запуску (код {}).", code(status)));
+                return Err(format!("The engine stopped while starting. (exit code {})", code(status)));
             }
             if health_ok(port) {
                 break;
             }
             if Instant::now() > deadline {
-                return Err("Engine не відповів за 3 хвилини.".into());
+                return Err("The engine did not respond within 3 minutes.".into());
             }
             thread::sleep(Duration::from_millis(300));
         }
@@ -318,7 +318,7 @@ impl EngineManager {
         loop {
             thread::sleep(Duration::from_secs(1));
             if let Some(status) = self.poll_exit(generation)? {
-                return Err(format!("Engine неочікувано зупинився (код {}).", code(status)));
+                return Err(format!("The engine stopped unexpectedly. (exit code {})", code(status)));
             }
         }
     }
@@ -331,7 +331,7 @@ impl EngineManager {
         winproc::hide_window(&mut cmd);
         cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let program = show(Path::new(cmd.get_program()));
-        let mut child = cmd.spawn().map_err(|e| format!("Не вдалося запустити {program}: {e}"))?;
+        let mut child = cmd.spawn().map_err(|e| format!("Could not start the engine ({program}: {e})"))?;
         if let Some(job) = self.job() {
             job.assign(&child);
         }

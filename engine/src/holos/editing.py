@@ -139,7 +139,7 @@ def _next_manual_id(p: Project, sid: str) -> str:
 def set_status(p: Project, path, ids: list[str], status: str) -> None:
     if status not in ("accepted", "rejected", "suggested"):
         raise EditError("status must be accepted, rejected or suggested")
-    before = _snap(p, "Вирізати" if status == "accepted" else "Залишити")
+    before = _snap(p, "Cut" if status == "accepted" else "Keep")
     found = 0
     for e in p.edits:
         if e.id in ids:
@@ -155,7 +155,7 @@ def adjust(p: Project, path, eid: str, start: float | None = None, end: float | 
            snap: str | None = None) -> None:
     """Move an edit's boundaries (source seconds). `snap` = "start" | "end" | "both": move to the quietest spot nearby."""
     e = _find(p, eid)
-    before = _snap(p, "Межі правки")
+    before = _snap(p, "Cut edges")
     dur = p.source(e.source).duration
     s = e.start if start is None else float(start)
     t = e.end if end is None else float(end)
@@ -185,7 +185,7 @@ def add_cut(p: Project, path, sid: str, start: float, end: float, snap: bool = T
     a, b = max(0.0, a), min(src.duration, b)
     if b - a < 0.02:
         raise EditError("selection is too short to cut")
-    before = _snap(p, "Вирізати виділене")
+    before = _snap(p, "Cut selection")
     eid = _next_manual_id(p, sid)
     pre, text, post = _words_text(p, sid, a, b)
     p.edits.append(CutEdit(id=eid, source=sid, start=round(a, 4), end=round(b, 4), status="accepted", kind="manual",
@@ -196,7 +196,7 @@ def add_cut(p: Project, path, sid: str, start: float, end: float, snap: bool = T
 
 def add_cuts(p: Project, path, ranges: list[dict], snap: bool = True) -> list[str]:
     """Several cuts as ONE undo step (a range that spans recordings arrives split per recording)."""
-    before = _snap(p, "Вирізати діапазон")
+    before = _snap(p, "Cut range")
     ids = []
     for r in ranges:
         sid = r["source"]
@@ -221,7 +221,7 @@ def add_cuts(p: Project, path, ranges: list[dict], snap: bool = True) -> list[st
 
 def set_automation(p: Project, path, changes: dict) -> None:
     from . import automation
-    before = _snap(p, "Автоматика")
+    before = _snap(p, "Automation")
     automation.update(p, dict(changes))
     _commit(p, path, before)
 
@@ -243,6 +243,6 @@ def delete(p: Project, path, eid: str) -> None:
     e = _find(p, eid)
     if not (isinstance(e, CutEdit) and e.kind == "manual"):
         raise EditError("only your own cuts can be deleted — use Keep for automatic ones")
-    before = _snap(p, "Видалити правку")
+    before = _snap(p, "Delete cut")
     p.edits = [x for x in p.edits if x.id != eid]
     _commit(p, path, before)

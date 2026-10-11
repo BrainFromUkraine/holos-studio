@@ -3,7 +3,8 @@
 //
 //   node scripts/release-notes.mjs 0.2.0-beta.1 title     → "Holos Studio 0.2.0 Beta 1"
 //   node scripts/release-notes.mjs 0.2.0-beta.1 release   → GitHub release body (English + Ukrainian + download)
-//   node scripts/release-notes.mjs 0.2.0-beta.1 app       → Ukrainian part only (shown in the app's update banner)
+//   node scripts/release-notes.mjs 0.2.0-beta.1 app       → both parts between <!-- en --> / <!-- uk --> marker lines
+//                                                           (the app's update banner shows the interface language)
 //
 // Fails when CHANGELOG.md has no section for the version — every release needs its notes.
 
@@ -61,7 +62,7 @@ if (!en || !uk) {
 }
 
 if (format === "app") {
-  console.log(uk);
+  console.log(["<!-- en -->", en, "<!-- uk -->", uk].join("\n"));
 } else {
   const intro = section.slice(0, section.search(/^### /m)).trim();
   const out = [

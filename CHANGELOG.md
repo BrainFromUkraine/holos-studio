@@ -4,7 +4,7 @@ All notable changes to Holos Studio. Versions follow [Semantic Versioning](https
 `0.2.0-beta.1`, `0.2.0-beta.2`, … are test builds of `0.2.0`; a version without a suffix is stable.
 
 Every release has an English and a Ukrainian part. The release page on GitHub shows both; the update banner in the
-app shows the Ukrainian part. Sections: **New**, **Improved**, **Fixed**, **Removed**, **Known limitations**.
+app shows the part in the interface language. Sections: **New**, **Improved**, **Fixed**, **Removed**, **Known limitations**.
 
 ## [0.2.0-beta.1] — 2026-10-11
 
@@ -32,6 +32,7 @@ First public beta.
   - timecodes for YouTube;
   - video through a template with a live preview.
 - **Claude via MCP.** Timecodes and edits on request; step-by-step setup in Settings.
+- **English and Ukrainian.** English by default; switch the language in Settings. Folder and file names are always English.
 
 #### Known limitations
 
@@ -62,6 +63,7 @@ First public beta.
   - таймкоди для YouTube;
   - відео за шаблоном із живим прев'ю.
 - **Claude через MCP.** Таймкоди і правки на прохання; покрокове підключення в Налаштуваннях.
+- **Англійська та українська.** За замовчуванням англійська; мову можна змінити в Налаштуваннях. Назви папок і файлів завжди англійською.
 
 #### Відомі обмеження
 

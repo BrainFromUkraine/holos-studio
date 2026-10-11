@@ -270,6 +270,6 @@ def suggest(p: Project, frames: dict[str, Frames] | None = None,
                 k += 1
                 before, _, after = _context(W, i, i)
                 edits.append(CutEdit(id=f"{sid}-g{k}", source=sid, start=round(a - 0.02, 3), end=round(b + 0.02, 3),
-                                     kind="sound", text="(звук без слів)", before=before, after=after,
+                                     kind="sound", text="(sound without words)", before=before, after=after,
                                      reason="voiced sound with no transcribed word — possible 'еее'"))
     return edits

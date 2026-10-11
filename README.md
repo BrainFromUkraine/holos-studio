@@ -31,6 +31,7 @@
 ## Requirements
 
 - Windows 10 / 11
+- Interface in English or Ukrainian (switch in Settings)
 - NVIDIA GPU with CUDA — recommended. Without one the program runs on the CPU, but speech recognition is much slower (tens of minutes for an hour of audio instead of a minute or two).
 
 ## Run from source
@@ -100,6 +101,7 @@ The project is at an early stage. Issues and ideas are welcome.
 ### Вимоги
 
 - Windows 10 / 11
+- Інтерфейс англійською або українською (перемикається в Налаштуваннях)
 - Відеокарта NVIDIA з CUDA — рекомендована. Без неї програма працює на процесорі, але розпізнавання мови значно повільніше (десятки хвилин на годину запису замість однієї-двох).
 
 Проєкт від каналу [Brain From Ukraine](https://github.com/BrainFromUkraine). Ліцензія — [MIT](LICENSE).

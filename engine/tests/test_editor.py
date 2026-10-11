@@ -61,7 +61,7 @@ def test_edit_ops_and_history(tmp_path):
     assert next(e for e in r["edits"] if e["id"] == cut["id"])["end"] == round(cut["end"] + 0.01, 4)
     r = c.post("/api/projects/edit", json={"path": path, "op": "cut", "source": "s2", "start": 1.0, "end": 1.5}).json()
     rng_id = r["id"]
-    assert r["history"]["undo_label"] == "Вирізати виділене"
+    assert r["history"]["undo_label"] == "Cut selection"
     r = c.post("/api/projects/edit", json={"path": path, "op": "status", "ids": [rng_id], "status": "rejected"}).json()
     assert next(e for e in r["edits"] if e["id"] == rng_id)["status"] == "rejected"
     for _ in range(4):

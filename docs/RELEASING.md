@@ -49,7 +49,9 @@ The release text can be edited on GitHub afterwards; the first line of the body 
 ### Test build without a release
 
 Actions → **Release** → *Run workflow* on any branch (or `gh workflow run release.yml --ref <branch>`).
-It builds the installer and uploads it as a workflow artifact `holos-studio-windows-<sha>`; nothing is published.
+It builds the installer, uploads it as a workflow artifact `holos-studio-windows-<sha>` (nothing is published), then
+smoke-tests it on the runner (`scripts/smoke-test.ps1`): silent install, first-run setup, engine health check, and
+that the engine stops both when the window closes and when the app is killed.
 Without the signing secret the build skips the updater artifacts (a warning, not an error).
 
 ### Local build on Windows
@@ -108,6 +110,7 @@ and the UI uses `http://127.0.0.1:8765` without a token, as before.
 |---|---|
 | App | `%LOCALAPPDATA%\Holos Studio` |
 | Python, environment, uv cache, engine copy | `%LOCALAPPDATA%\com.brainfromukraine.holos\` (`python`, `env`, `uv-cache`, `engine-src`) — ~5 GB |
+| Setup / engine log (last start) | `%LOCALAPPDATA%\com.brainfromukraine.holos\engine.log` |
 | Projects you save, user export templates | wherever you save them; templates in `Documents\Holos Studio` (`HOLOS_HOME`) |
 | Whisper models | Hugging Face cache (`%USERPROFILE%\.cache\huggingface`), downloaded on first transcription |
 

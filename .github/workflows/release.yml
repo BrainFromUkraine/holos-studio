@@ -120,7 +120,7 @@ jobs:
             const fs = require("fs");
             const f = process.env.RUNNER_TEMP + "/build.log";
             const lines = fs.existsSync(f) ? fs.readFileSync(f, "utf8").split(/\r?\n/) : ["(no build log)"];
-            const tail = lines.filter((l) => l.trim()).slice(-60).join("\n");
+            const tail = lines.map((l) => l.replace(/\x1b\[[0-9;]*m/g, "")).filter((l) => l.trim()).slice(-60).join("\n");
             const esc = tail.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
             console.log("::error title=Build log (tail)::" + esc);
           '
@@ -135,3 +135,11 @@ jobs:
             app/src-tauri/target/release/bundle/nsis/*.sig
           if-no-files-found: error
           compression-level: 0
+
+      # Install on the runner, let the app create its Python environment, check the engine starts and stops.
+      - name: Smoke test the installer
+        if: env.IS_TAG != 'true'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem app/src-tauri/target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          ./scripts/smoke-test.ps1 -Installer $setup.FullName

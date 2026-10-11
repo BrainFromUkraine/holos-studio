@@ -36,10 +36,15 @@ Design decisions: [DESIGN.md](DESIGN.md) — automatic first, pro audio-tool lay
 - ⬜ Loudness presets (podcast / YouTube / broadcast), FLAC, cover art and metadata
 - ✅ Undo / redo (history kept next to the project)
 
-## Milestone 3 — Desktop app
+## Milestone 3 — Desktop app 🟨
 
-- ⬜ Tauri v2 shell, engine as sidecar
-- ⬜ Windows installer, GPU detection, model download manager
+Details: [RELEASING.md](RELEASING.md).
+
+- ✅ Tauri v2 shell manages the engine: Python environment created on first run with uv (progress screen), engine started hidden with a per-launch token, killed with the app
+- ✅ Windows installer (NSIS, per-user, Ukrainian / English) built and published by GitHub Actions
+- ✅ Auto-update from GitHub Releases (signed), one click
+- ✅ Claude Desktop MCP config for the installed engine
+- ⬜ GPU detection with CPU fallback, model download manager
 
 ## Milestone 4 — MCP
 

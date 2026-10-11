@@ -57,3 +57,8 @@ Thumbs.db
 
 # TypeScript
 *.tsbuildinfo
+
+# --- Packaging: staged by CI (scripts/stage-engine.mjs, uv/ffmpeg downloads) ---
+app/src-tauri/resources/bin/
+app/src-tauri/resources/engine/
+app/src-tauri/gen/

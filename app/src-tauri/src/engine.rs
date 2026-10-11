@@ -9,6 +9,7 @@
 //!   4. Kill it when the app exits (plus a Windows Job Object as a safety net, see `winproc.rs`).
 //!
 //! `<data>` is `app_local_data_dir()` = `%LOCALAPPDATA%\com.brainfromukraine.holos`.
+//! Everything uv and the engine print also goes to `<data>/engine.log` (rewritten on every start).
 //!
 //! Debug builds (`tauri dev`): nothing is managed. The developer runs `uv run holos serve --dev` by hand and the
 //! UI talks to http://127.0.0.1:8765 without a token, exactly as before.
@@ -85,6 +86,8 @@ struct Inner {
     /// Bumped by restart / shutdown. A worker thread started for an older generation stops quietly.
     generation: u64,
     shutting_down: bool,
+    /// `<data>/engine.log`: the same lines as `log`, kept on disk for support (rewritten on every start).
+    log_file: Option<fs::File>,
 }
 
 #[derive(Clone)]
@@ -143,6 +146,7 @@ impl EngineManager {
                 child: None,
                 generation: 0,
                 shutting_down: false,
+                log_file: None,
             })),
             job: Arc::new(if dev { None } else { KillOnClose::new() }),
         }
@@ -180,12 +184,14 @@ impl EngineManager {
             g.token.clear();
             g.error = None;
             g.log.clear();
+            g.log_file = None;
             g.generation
         };
         self.emit_state(&app);
         let me = self.clone();
         thread::spawn(move || {
             if let Err(e) = me.bring_up(&app, generation) {
+                me.line(&app, generation, format!("ERROR: {e}"), false);
                 me.update(&app, generation, |g| {
                     g.phase = Phase::Error;
                     g.error = Some(e);
@@ -211,6 +217,12 @@ impl EngineManager {
     fn bring_up(&self, app: &AppHandle, generation: u64) -> Result<(), String> {
         let p = Paths::resolve(app)?;
         fs::create_dir_all(&p.data).map_err(|e| format!("Не вдалося створити {}: {e}", show(&p.data)))?;
+        if let Ok(file) = fs::File::create(p.data.join("engine.log")) {
+            let mut g = self.lock();
+            if g.generation == generation {
+                g.log_file = Some(file);
+            }
+        }
         if !p.bundled_src.join("pyproject.toml").is_file() {
             return Err(format!("У встановленні бракує коду engine ({}). Перевстановіть Holos Studio.", show(&p.bundled_src)));
         }
@@ -421,6 +433,9 @@ impl EngineManager {
                 g.log.pop_front();
             }
             g.log.push_back(line.clone());
+            if let Some(f) = g.log_file.as_mut() {
+                let _ = writeln!(f, "{line}");
+            }
         }
         if setup {
             let _ = app.emit(EVENT_SETUP, SetupLine { line });

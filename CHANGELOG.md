@@ -6,6 +6,28 @@ All notable changes to Holos Studio. Versions follow [Semantic Versioning](https
 Every release has an English and a Ukrainian part. The release page on GitHub shows both; the update banner in the
 app shows the part in the interface language. Sections: **New**, **Improved**, **Fixed**, **Removed**, **Known limitations**.
 
+## [Unreleased]
+
+### English
+
+#### New
+
+- **Vertical zoom.** A second slider next to the time zoom makes the waveform up to 8× taller, so quiet mouth clicks and breaths are easy to see. Both sliders have icons and a tooltip; double-click the vertical one to reset it.
+
+#### Fixed
+
+- **Recordings are joined back to back.** There was always about 0.7 s of extra silence between two recordings, whatever the pause settings, and it could not be removed. Now the clips follow each other directly, and the pause at a join is as long as any other shortened pause (the pause target). The silence comes from the recordings themselves. Open projects are updated automatically.
+
+### Українською
+
+#### Нове
+
+- **Вертикальний масштаб.** Другий слайдер поруч із масштабом часу робить хвилю до 8× вищою, тож тихі клацання слини й вдихи добре видно. Обидва слайдери мають іконки й підказку; подвійне натискання на вертикальний повертає його до початкового.
+
+#### Виправлено
+
+- **Записи склеюються встик.** Між двома записами завжди лишалося близько 0,7 с зайвої тиші, незалежно від налаштувань пауз, і прибрати її було не можна. Тепер кліпи йдуть один за одним, а пауза на стику така сама, як будь-яка скорочена пауза (цільова довжина паузи). Тиша береться із самих записів. Відкриті проєкти оновлюються автоматично.
+
 ## [0.2.0-beta.1] — 2026-10-11
 
 First public beta.

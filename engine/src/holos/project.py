@@ -145,7 +145,7 @@ class AnalysisSettings(BaseModel):
 
 class TimelineSettings(BaseModel):
     level_match_lufs: float = -20.0
-    gap_between: float = 0.6
+    gap_between: float = 0.6         # unused: recordings are joined back to back (kept so old projects load)
     lead_in: float = 0.4
     tail: float = 1.2
     crossfade: float = 0.04

@@ -81,7 +81,7 @@ LRA, drop-outs, where every edit landed in the output timeline).
 | breaths | −12 dB with 20 ms ramps |
 | pauses | longer than 0.9 s → 0.7 s, cut from the middle with crossfade |
 | drop-outs | gate holes filled with the recording's own room tone |
-| joins | 0.6 s room tone between files |
+| joins | files back to back; the pause at a join is the recordings' own silence, as long as the pause target |
 | highpass | 75 Hz, 4th order |
 | mouth clicks | high-band click repair (off / light / normal / strong) |
 | declick | FFmpeg `adeclick` |

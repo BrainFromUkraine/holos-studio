@@ -239,9 +239,15 @@ def safe_name(name: str) -> str:
     return _BAD_NAME.sub("_", name).strip(" .") or "episode"
 
 
+# Bump when the engine renders the same project differently, so cached renders are made again.
+# 2: recordings joined back to back (no room-tone gap between them).
+RENDER_VERSION = 2
+
+
 def fingerprint(p: Project) -> str:
     """Hash of everything that changes the rendered audio (not chapters or export settings)."""
     data = p.model_dump(mode="json", exclude={"chapters", "export", "transcript_meta", "name"})
+    data["_render_version"] = RENDER_VERSION
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:16]
 
 

@@ -209,3 +209,57 @@ def test_find_retake_does_not_eat_previous_word():
     nxt = _words("Це був тиждень електроніки на BrainFromUkraine. Якщо бачили цікаву новину")
     i, _ = find_retake(prev, nxt)
     assert prev[i].w == "Це"
+
+
+def _tone_file(path, sil_before, speech, sil_after):
+    t = np.arange(int(speech * SR)) / SR
+    x = np.concatenate([noise(sil_before, -70), 0.2 * np.sin(2 * np.pi * 220 * t), noise(sil_after, -70)])
+    sf.write(path, x, SR)
+    return len(x) / SR
+
+
+def _two_file_project(tmp_path, after_first=1.5, before_second=1.0):
+    from holos.project import Clip, Source, SourceAnalysis
+    p = Project(name="join")
+    for sid, (pre, post) in {"s1": (1.0, after_first), "s2": (before_second, 1.0)}.items():
+        dur = _tone_file(tmp_path / f"{sid}.wav", pre, 2.0, post)
+        p.sources.append(Source(id=sid, path=str(tmp_path / f"{sid}.wav"), sha256=sid, sr=SR, channels=1, duration=dur))
+        p.analysis[sid] = SourceAnalysis(speech_on=pre, speech_off=pre + 2.0, speech_level_db=-14, room_db=-70,
+                                         loudness_lufs=p.timeline_settings.level_match_lufs,
+                                         room_tone=[(0.0, min(pre, 0.9))])
+        p.timeline.append(Clip(source=sid, start=0.0, end=dur))
+    return p
+
+
+def _speech_gap(y, start_after):
+    """Silence (s) between the end of the first tone and the start of the second, measured on the render."""
+    from scipy.ndimage import maximum_filter1d
+    loud = maximum_filter1d(np.abs(y), int(0.006 * SR)) > 0.05      # envelope, not single samples
+    i0 = int(start_after * SR)
+    end1 = i0 + np.argmin(loud[i0:])                 # first quiet sample after the first tone
+    start2 = end1 + np.argmax(loud[end1:])           # next loud sample
+    return (start2 - end1) / SR, start2 / SR
+
+
+@pytest.mark.parametrize("target", [0.3, 0.7])
+def test_recordings_join_back_to_back(tmp_path, target):
+    from holos.edit import build_program, timeline_map
+    p = _two_file_project(tmp_path)
+    p.automation.pauses, p.automation.pause_target = True, target
+    prog = build_program(p)
+    gap, start2 = _speech_gap(prog.audio, p.timeline_settings.lead_in + 0.5)
+    assert gap == pytest.approx(target, abs=0.02)
+    # the editor / chapters mapping says the same as the renderer
+    tm = timeline_map(p)
+    assert dict(prog.clip_starts)["s2"] == pytest.approx(tm["s2"][0], abs=0.002)
+    assert start2 == pytest.approx(tm["s2"][0] + (p.analysis["s2"].speech_on - tm["s2"][1]), abs=0.01)
+
+
+def test_join_takes_missing_silence_from_the_next_recording(tmp_path):
+    from holos.edit import build_program, edge_pads
+    p = _two_file_project(tmp_path, after_first=0.1, before_second=1.0)   # first file stops right after the voice
+    p.automation.pauses, p.automation.pause_target = True, 0.4
+    (_, tail1), (lead2, _) = edge_pads(p)
+    assert tail1 == pytest.approx(0.1, abs=1e-6) and lead2 > 0.3
+    gap, _ = _speech_gap(build_program(p).audio, p.timeline_settings.lead_in + 0.5)
+    assert gap == pytest.approx(0.4, abs=0.02)

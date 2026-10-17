@@ -73,7 +73,7 @@ Ported from the pipeline already used to master a real episode:
 | Breath handling | gain envelope, −12 dB default, 20 ms ramps, never into word onsets |
 | Pause tightening | non-speech > 0.9 s shortened to 0.7 s, cut from the middle with equal-power crossfade |
 | Gate drop-outs | holes well below room tone filled with captured room tone |
-| Joins between files | room tone gap with crossfades |
+| Joins between files | back to back with a crossfade; the join keeps the recordings' own silence, trimmed to the pause target |
 | Clean-up | high-pass 75 Hz (4th order), de-click, gentle EQ |
 | De-ess | STFT dynamic EQ above ~4.5 kHz, global threshold, chunked for long files |
 | Dynamics | two-stage compression (RMS levelling + peak control) |

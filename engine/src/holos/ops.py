@@ -241,7 +241,8 @@ def safe_name(name: str) -> str:
 
 # Bump when the engine renders the same project differently, so cached renders are made again.
 # 2: recordings joined back to back (no room-tone gap between them).
-RENDER_VERSION = 2
+# 3: wet mouth clicks in quiet moments replaced with room sound.
+RENDER_VERSION = 3
 
 
 def fingerprint(p: Project) -> str:

@@ -150,6 +150,8 @@ def loudness(x: np.ndarray, p: dict, c: Context) -> np.ndarray:
 
 # mouth clicks / saliva: strength → (dB above the 30 ms median, dB above the loudest 2–12 ms on both sides, max ms)
 MOUTHCLICK_STRENGTH = {"light": (20.0, 10.0, 2.0), "normal": (16.0, 7.0, 3.0), "strong": (12.0, 5.0, 4.0)}
+# wet clicks in quiet moments: strength → dB jump of the 0.8–12 kHz band over the 3–15 ms before it
+WETCLICK_JUMP_DB = {"light": 18.0, "normal": 12.0, "strong": 9.0}
 _CLICK_HOP = 0.00025                                # analysis frame: 0.25 ms
 
 
@@ -193,12 +195,98 @@ def find_mouth_clicks(x: np.ndarray, sr: int, strength: str = "normal") -> list[
     return [(a * hop, b * hop) for a, b in out if b - a <= max_len]
 
 
+def _frames_db(y: np.ndarray, hop: int, smooth: int) -> np.ndarray:
+    n = len(y) // hop
+    E = (y[: n * hop] ** 2).reshape(n, hop).mean(1)
+    return 10 * np.log10(np.convolve(E, np.ones(smooth) / smooth, mode="same") + 1e-14)
+
+
+def find_wet_clicks(x: np.ndarray, sr: int, strength: str = "normal") -> list[tuple[int, int]]:
+    """Wet mouth clicks (saliva, lips parting before a word): a sharp broadband hit that rings at 1–6 kHz for
+    2–8 ms in a QUIET moment — a pause, just before or after a word. Learned from marked examples: most of
+    their energy is below 3 kHz and they last longer than the ticks `find_mouth_clicks` looks for.
+
+    A hit counts when the 0.8–12 kHz band jumps well above its loudest level 3–15 ms earlier, falls back within
+    10 ms, stays quiet for the next 5–40 ms (so a "т"/"к"/"п" burst followed by a vowel is left alone) and the
+    40 ms before it are far below the speech level. Returns sample ranges.
+    """
+    from scipy.ndimage import maximum_filter1d
+    jump = WETCLICK_JUMP_DB.get(strength, WETCLICK_JUMP_DB["normal"])
+    hop = max(1, int(_CLICK_HOP * sr))
+    if len(x) < hop * 400:
+        return []
+    sos = butter(4, [800, min(12000, 0.45 * sr)], btype="bandpass", fs=sr, output="sos")
+    e = _frames_db(sosfiltfilt(sos, x), hop, 4)                       # band level, 1 ms smoothing
+    bb = _frames_db(x, hop, int(0.020 / _CLICK_HOP))                  # broadband level, 20 ms
+    n = min(len(e), len(bb))
+    e, bb = e[:n], bb[:n]
+    speech = float(np.percentile(bb, 90))
+    f = lambda sec: int(round(sec / _CLICK_HOP))                      # noqa: E731  seconds → frames
+    # loudest band level 3–15 ms before each frame
+    W = f(0.012)
+    mx = maximum_filter1d(e, size=W, mode="nearest")                  # centred window
+    pre = np.full(n, np.inf)
+    shift = f(0.003) + W // 2
+    pre[shift:] = mx[: n - shift]
+    cand = np.where(e > pre + jump)[0]
+    out: list[tuple[int, int]] = []
+    i = 0
+    while i < len(cand):
+        a = int(cand[i])
+        base = pre[a]
+        b, lim = a, min(n - 1, a + f(0.020))
+        while b < lim and e[b] > base + 4:
+            b += 1
+        post = e[min(n - 1, b + f(0.005)): min(n, b + f(0.040))]
+        ctx = bb[max(0, a - f(0.040)): max(0, a - f(0.010))]
+        if ((b - a) <= f(0.010) and len(post) and np.percentile(post, 90) < base + 6
+                and len(ctx) and ctx.max() < speech - 20):
+            out.append((a * hop, (b + 1) * hop))
+        while i < len(cand) and cand[i] <= b + f(0.003):
+            i += 1
+    return out
+
+
+def repair_wet_clicks(x: np.ndarray, sr: int, clicks: list[tuple[int, int]]) -> np.ndarray:
+    """Replace each click (1 ms before to 3 ms after) with the calmest same-length piece of the room sound
+    within 40 ms, crossfaded over 1 ms. The noise floor stays, so no drop-out is heard; the length is unchanged."""
+    y = x.copy()
+    hp = sosfiltfilt(butter(4, 800, btype="highpass", fs=sr, output="sos"), x)
+    pre, post, r = int(0.001 * sr), int(0.003 * sr), max(2, int(0.001 * sr))
+    ramp = 0.5 - 0.5 * np.cos(np.linspace(0, np.pi, r))
+    reach = int(0.040 * sr)
+    for a, b in clicks:
+        a0, b0 = max(0, a - pre), min(len(x), b + post)
+        L = b0 - a0
+        if L <= 2 * r:
+            continue
+        best, best_e = None, np.inf
+        for s0 in range(a0 - reach, a0 + reach, max(1, L // 2)):
+            if s0 < 0 or s0 + L > len(x) or (s0 < b0 and s0 + L > a0):
+                continue
+            e = float(np.abs(hp[s0:s0 + L]).max())
+            if e < best_e:
+                best, best_e = s0, e
+        if best is None:
+            continue
+        w = np.ones(L)
+        w[:r], w[-r:] = ramp, ramp[::-1]
+        y[a0:b0] = y[a0:b0] * (1 - w) + x[best:best + L] * w
+    return y
+
+
 @numpy_module("mouthclick")
 def mouthclick(x: np.ndarray, p: dict, c: Context) -> np.ndarray:
-    """Remove mouth clicks by fading out only their high band (> 3 kHz) — the voice underneath stays,
-    nothing is cut, the length does not change."""
+    """Remove mouth clicks. Wet clicks in quiet moments are replaced with the room sound around them;
+    short ticks inside speech lose only their high band (> 3 kHz), so the voice underneath stays.
+    Nothing is cut, the length does not change."""
     strength = p.get("strength", "normal")
-    clicks = find_mouth_clicks(x, c.sr, strength)
+    wet = find_wet_clicks(x, c.sr, strength)
+    if wet:
+        x = repair_wet_clicks(x, c.sr, wet)
+    pad = int(0.002 * c.sr)
+    clicks = [(a, b) for a, b in find_mouth_clicks(x, c.sr, strength)
+              if not any(a < wb + pad and b > wa - pad for wa, wb in wet)]
     if clicks:
         sos = butter(4, 3000, btype="highpass", fs=c.sr, output="sos")
         y = x.copy()
@@ -211,7 +299,7 @@ def mouthclick(x: np.ndarray, p: dict, c: Context) -> np.ndarray:
             y[a0:b0] -= hp * w
         x = y
     if c.log is not None:
-        c.log["mouthclick"] = {"strength": strength, "clicks": len(clicks)}
+        c.log["mouthclick"] = {"strength": strength, "clicks": len(clicks) + len(wet), "wet": len(wet)}
     return x
 
 

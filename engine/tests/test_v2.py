@@ -209,3 +209,52 @@ def test_mcp_tools_edit_in_episode_time(tmp_path, home):
     assert M.get_automation(path)["clicks"] == "off"
     assert M.list_projects()[0]["name"] == "M"
     assert T.load_state()["mcp_last_seen"] > 0
+
+
+def _wet_click(rng, sr, amp=0.012):
+    """Damped 2.5 kHz ringing, ~4 ms — the shape of the saliva clicks marked in real recordings."""
+    t = np.arange(int(0.006 * sr)) / sr
+    return amp * np.sin(2 * np.pi * 2500 * t + rng.uniform(0, 6)) * np.exp(-t / 0.0012)
+
+
+def _speechlike(rng, sr, sec, f0=130):
+    t = np.arange(int(sec * sr)) / sr
+    pulses = np.zeros(len(t))
+    pulses[:: int(sr / f0)] = 1
+    from scipy.signal import lfilter
+    return lfilter([1], [1, -1.6, 0.8], pulses) * 0.08
+
+
+def test_wet_clicks_in_pauses_are_replaced_with_room_sound():
+    from holos.dsp import find_wet_clicks
+    rng = np.random.default_rng(1)
+    x = rng.standard_normal(SR * 4) * 0.0008                      # room
+    x[: int(0.8 * SR)] += _speechlike(rng, SR, 0.8)                  # a phrase, then a pause
+    x[int(3.0 * SR):] += _speechlike(rng, SR, 1.0)
+    clicks = [1.30, 2.10, 2.75]
+    for c in clicks:
+        k = _wet_click(rng, SR)
+        x[int(c * SR):int(c * SR) + len(k)] += k
+    found = [a / SR for a, _ in find_wet_clicks(x, SR, "normal")]
+    assert all(any(abs(f - c) < 0.004 for f in found) for c in clicks)
+    assert not any(f < 0.8 or f > 3.0 for f in found)                 # nothing inside the speech
+    log = {}
+    y = mouthclick(x, {"strength": "normal"}, Context(sr=SR, log=log))
+    assert len(y) == len(x) and log["mouthclick"]["wet"] == len(clicks)
+    for c in clicks:
+        i = int(c * SR)
+        assert np.abs(y[i:i + int(0.006 * SR)]).max() < 0.004          # was ~0.012; room is ~0.003 peak
+    # the speech is untouched
+    assert np.array_equal(y[: int(0.7 * SR)], x[: int(0.7 * SR)])
+
+
+def test_wet_click_detector_leaves_a_plosive_before_a_vowel():
+    from holos.dsp import find_wet_clicks
+    rng = np.random.default_rng(2)
+    x = rng.standard_normal(SR * 3) * 0.0008
+    burst = int(1.5 * SR)
+    k = _wet_click(rng, SR, amp=0.02)                              # "т" / "к" release...
+    x[burst:burst + len(k)] += k
+    v = int(burst + 0.015 * SR)                                     # ...and the vowel 15 ms later
+    x[v:v + int(0.5 * SR)] += _speechlike(rng, SR, 0.5)
+    assert not [a for a, _ in find_wet_clicks(x, SR, "strong") if abs(a / SR - 1.5) < 0.01]

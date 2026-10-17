@@ -261,7 +261,7 @@ wheels = [
 
 [[package]]
 name = "holos-engine"
-version = "0.2.0b2"
+version = "0.2.0b3"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

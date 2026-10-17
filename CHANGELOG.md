@@ -6,6 +6,22 @@ All notable changes to Holos Studio. Versions follow [Semantic Versioning](https
 Every release has an English and a Ukrainian part. The release page on GitHub shows both; the update banner in the
 app shows the part in the interface language. Sections: **New**, **Improved**, **Fixed**, **Removed**, **Known limitations**.
 
+## [0.2.0-beta.3] — 2026-10-17
+
+Wet mouth clicks are removed properly.
+
+### English
+
+#### Improved
+
+- **Mouth clicks.** Wet clicks (saliva, lips parting before a word) are now found and removed. They ring at 1–6 kHz for a few milliseconds, mostly below the band the old detector watched, so many were missed or only partly removed. Now such a click in a pause or right next to a word is replaced with the room sound around it: nothing is cut and the length does not change. A "т", "к" or "п" followed by a vowel is left alone. Short ticks inside speech are handled as before. The Automation strength (light / normal / strong) controls both.
+
+### Українською
+
+#### Покращено
+
+- **Клацання слини.** Тепер програма знаходить і прибирає мокрі клацання (слина, губи розмикаються перед словом). Вони «дзвенять» на 1–6 кГц кілька мілісекунд, здебільшого нижче смуги, яку слухав старий детектор, тож багато з них пропускались або прибирались лише частково. Тепер таке клацання в паузі чи поруч зі словом замінюється фоном кімнати навколо нього: нічого не вирізається, довжина не змінюється. «Т», «к» чи «п» перед голосною не чіпаються. Короткі тіки всередині мови прибираються, як і раніше. Сила в Автоматиці (light / normal / strong) керує обома.
+
 ## [0.2.0-beta.2] — 2026-10-17
 
 Recordings join back to back without extra silence; vertical zoom in the editor.

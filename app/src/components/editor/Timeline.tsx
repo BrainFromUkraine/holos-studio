@@ -51,6 +51,7 @@ type Props = {
   clips: ClipBox[];
   assets: Assets;
   view: View;
+  vzoom: number; // waveform height multiplier (vertical zoom), 1 = fit
   width: number;
   height: number;
   tool: Tool;
@@ -85,7 +86,7 @@ export function useLayout(height: number, showSpec: boolean) {
 }
 
 export function TimelineCanvas(props: Props) {
-  const { tl, pieces, clips, assets, view, width, tool, sel, splits, playhead, showSpec, onView, onSelect, onSeek, onSplit, onMarkerMove, onMarkerAdd } = props;
+  const { tl, pieces, clips, assets, view, vzoom, width, tool, sel, splits, playhead, showSpec, onView, onSelect, onSeek, onSplit, onMarkerMove, onMarkerAdd } = props;
   const lang = useLang();
   const cv = useRef<HTMLCanvasElement>(null);
   const L = useLayout(props.height, showSpec);
@@ -187,7 +188,7 @@ export function TimelineCanvas(props: Props) {
     const wy = ty + HEAD + 6;
     const wh = th - HEAD - 10;
     const mid = wy + wh / 2;
-    const amp = (wh / 2) * 1.25;
+    const amp = (wh / 2) * 1.25 * vzoom;
     let pi = Math.max(0, pieceIndex(pieces, xs(0)));
     for (let px = 0; px < W; px++) {
       const T = xs(px);
@@ -354,7 +355,7 @@ export function TimelineCanvas(props: Props) {
     // lane separators
     ctx.fillStyle = C.border;
     for (const y of [L.markers.y, L.track.y, L.spec.y, L.loud.y, L.total - 1]) ctx.fillRect(0, y - 1, W, 1);
-  }, [tl, pieces, clips, assets, assets.version, view, width, L, sel, splits, showSpec, markers, sx, xs, lang]);
+  }, [tl, pieces, clips, assets, assets.version, view, vzoom, width, L, sel, splits, showSpec, markers, sx, xs, lang]);
 
   // ---- hit testing ------------------------------------------------------------------------------
   const laneAt = (y: number) => (y < L.markers.y ? "ruler" : y < L.track.y ? "markers" : y < L.spec.y ? "track" : y < L.loud.y ? "spec" : "loud");

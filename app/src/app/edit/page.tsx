@@ -13,6 +13,7 @@ import { episodeTime, reasonText, type Timeline } from "@/lib/timeline";
 
 const HEAD_W = 190;
 const MAX_PPS = 1500;
+const MAX_VZOOM = 8; // vertical zoom: waveform up to 8× taller (quiet clicks and breaths become visible)
 
 function useAssets(path: string | null, tl: Timeline | null): Assets {
   const [a, setA] = useState<Assets>({ peaks: {}, spec: {}, loud: {}, version: 0 });
@@ -64,6 +65,7 @@ export default function EditorPage() {
   const [sel, setSel] = useState<ESel>(null);
   const [splits, setSplits] = useState<number[]>([]);
   const [view, setView] = useState<View>({ x0: 0, pps: 1 });
+  const [vzoom, setVzoom] = useState(1); // waveform height multiplier (vertical zoom)
   const [T, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -342,9 +344,16 @@ export default function EditorPage() {
           <span className="mono muted" style={{ fontSize: 10.5 }}>{t("of {total}", { total: fmtEp(length) })}</span>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-          <span className="muted" style={{ fontSize: 12 }}>{t("Zoom")}</span>
-          <input type="range" aria-label={t("Zoom")} min={0} max={100} value={Number.isFinite(zoomLog(view.pps)) ? zoomLog(view.pps) : 0}
-            onChange={(e) => { const pps = fromZoomLog(Number(e.target.value)); const c = view.x0 + width / view.pps / 2; changeView({ pps, x0: c - width / pps / 2 }); }} style={{ width: 120 }} />
+          <label title={t("Horizontal zoom")} style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--text2)" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4" /></svg>
+            <input type="range" aria-label={t("Horizontal zoom")} min={0} max={100} value={Number.isFinite(zoomLog(view.pps)) ? zoomLog(view.pps) : 0}
+              onChange={(e) => { const pps = fromZoomLog(Number(e.target.value)); const c = view.x0 + width / view.pps / 2; changeView({ pps, x0: c - width / pps / 2 }); }} style={{ width: 110 }} />
+          </label>
+          <label title={t("Vertical zoom")} style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--text2)" }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4" /></svg>
+            <input type="range" aria-label={t("Vertical zoom")} min={0} max={100} value={Math.round((Math.log(vzoom) / Math.log(MAX_VZOOM)) * 100)}
+              onChange={(e) => setVzoom(Math.pow(MAX_VZOOM, Number(e.target.value) / 100))} onDoubleClick={() => setVzoom(1)} style={{ width: 80 }} />
+          </label>
           <Link href="/automation/" className="btn" style={{ height: 32, display: "flex", alignItems: "center", gap: 6, textDecoration: "none" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></svg>
             {t("Automation")}
@@ -371,7 +380,7 @@ export default function EditorPage() {
             ) : (
               <>
                 <TrackHeaders height={size.h} showSpec={showSpec} onToggleSpec={() => setShowSpec((s) => !s)} clipsCount={tl.sources.length} chain={tl.chain.filter((c) => c.enabled).length} />
-                <TimelineCanvas tl={tl} pieces={pieces} clips={clips} assets={assets} view={view} width={width} height={size.h} tool={tool} sel={sel} splits={splits}
+                <TimelineCanvas tl={tl} pieces={pieces} clips={clips} assets={assets} view={view} vzoom={vzoom} width={width} height={size.h} tool={tool} sel={sel} splits={splits}
                   playhead={T} showSpec={showSpec} onView={changeView} onSelect={setSel} onSeek={seek}
                   onSplit={(t) => setSplits((s) => [...s, t].sort((a, b) => a - b))}
                   onMarkerMove={(i, t) => saveMarkers(tl.chapters.map((c, k) => ({ time: k === i ? t : c.time, title: c.title })))}

@@ -73,7 +73,8 @@ export const editor: Record<string, string | string[]> = {
   "Forward 5 s": "Вперед 5 с",
   "Loop selection (L)": "Цикл виділеного (L)",
   "of {total}": "з {total}",
-  Zoom: "Масштаб",
+  "Horizontal zoom": "Горизонтальний масштаб",
+  "Vertical zoom": "Вертикальний масштаб",
 
   // ---- editor page: automatic edits strip ----
   "Done automatically:": "Зроблено автоматично:",

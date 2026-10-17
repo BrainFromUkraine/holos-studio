@@ -1,7 +1,8 @@
 """Timeline assembly: apply accepted edits to sources and join clips into one program.
 
 Per clip: level match → gain edits (breaths) → fill drop-outs with room tone →
-cuts / pause shortening (equal-power crossfades). Clips are joined over room tone.
+cuts / pause shortening (equal-power crossfades). Clips are joined back to back: the silence at a
+join comes from the recordings themselves and is as long as any other shortened pause (`join_pause`).
 Returns the program signal plus a map of where every applied edit landed.
 """
 from __future__ import annotations
@@ -12,6 +13,10 @@ import numpy as np
 
 from ..io import load_mono
 from ..project import CutEdit, FillEdit, GainEdit, PauseEdit, Project
+
+LEAD_PAD = 0.02         # kept before the first word of a recording
+TAIL_PAD = 0.08         # kept after the last word of the last recording (the episode tail follows)
+JOIN_PAUSE_OFF = 0.7    # silence at a join between recordings when pause shortening is off
 
 
 def db2a(d: float) -> float:
@@ -82,6 +87,38 @@ def _ramp_env(n: int, gain: float, ramp: int) -> np.ndarray:
     return seg
 
 
+def join_pause(p: Project) -> float:
+    """Silence between the last word of one recording and the first word of the next."""
+    a = p.automation
+    return max(0.0, a.pause_target) if a.pauses else JOIN_PAUSE_OFF
+
+
+def edge_pads(p: Project) -> list[tuple[float, float]]:
+    """(lead, tail) kept around the speech of every recording, in timeline order.
+
+    Recordings are joined back to back with a crossfade, so the silence at a join is
+    tail(i) + lead(i+1) - crossfade; both pads are chosen to make it `join_pause`. The silence is the
+    recordings' own; when one of them has too little, the neighbour gives more.
+    """
+    xf = p.timeline_settings.crossfade
+    need = join_pause(p) + xf
+    room: list[tuple[float, float]] = []          # silence available before / after the speech
+    for clip in p.timeline:
+        A = p.analysis.get(clip.source)
+        end = min(clip.end, p.source(clip.source).duration)
+        if A is None:
+            room.append((0.0, 0.0))
+        else:
+            room.append((max(0.0, A.speech_on - clip.start), max(0.0, end - A.speech_off)))
+    pads = [[LEAD_PAD, TAIL_PAD] for _ in p.timeline]
+    for i in range(len(pads) - 1):
+        nxt_lead = min(LEAD_PAD, room[i + 1][0], need)
+        tail = min(room[i][1], need - nxt_lead)
+        pads[i][1] = max(0.0, tail)
+        pads[i + 1][0] = max(0.0, min(room[i + 1][0], need - pads[i][1]))
+    return [(a, b) for a, b in pads]
+
+
 def build_program(p: Project) -> Program:
     sr = p.sample_rate
     ts = p.timeline_settings
@@ -89,8 +126,9 @@ def build_program(p: Project) -> Program:
     prog = Program(audio=np.zeros(0), sr=sr)
     clips_audio: list[tuple[np.ndarray, list, float, str]] = []
     rt_pieces: list[np.ndarray] = []
+    pads = edge_pads(p)
 
-    for clip in p.timeline:
+    for ci, clip in enumerate(p.timeline):
         src = p.source(clip.source)
         A = p.analysis[clip.source]
         x, fsr = load_mono(src.path)
@@ -124,7 +162,7 @@ def build_program(p: Project) -> Program:
                     L = b - a
                     x[a:b] += rt_local.take(L / sr + 0.01)[:L] * _fade_window(L, int(0.02 * sr))
 
-        a0, b0, removals = clip_plan(clip, A, edits, ts.crossfade, len(x) / sr)
+        a0, b0, removals = clip_plan(clip, A, edits, ts.crossfade, len(x) / sr, *pads[ci])
         pieces, cur = [], a0
         for cs, ce in removals:
             pieces.append(x[int(cur * sr):int(cs * sr)])
@@ -140,11 +178,12 @@ def build_program(p: Project) -> Program:
 
         clips_audio.append((seg, [(e, mapt(e.start)) for e in edits], a0, clip.source))
 
-    # join clips over room tone
+    # join clips back to back (the pause at each join is the recordings' own silence, see edge_pads);
+    # room tone only before the first and after the last one
     rt = RoomTone(rt_pieces, sr, ts.crossfade)
     out = rt.take(ts.lead_in)
     fade = int(0.015 * sr)
-    for i, (seg, emap, a0, sid) in enumerate(clips_audio):
+    for seg, emap, a0, sid in clips_audio:
         seg = seg.copy()
         seg[:fade] *= np.linspace(0, 1, fade)
         start = len(out) / sr - ts.crossfade
@@ -152,18 +191,19 @@ def build_program(p: Project) -> Program:
         prog.clip_starts.append((sid, round(start, 3)))
         for e, t in emap:
             prog.placements.append(Placement(e.id, e.type, sid, e.start, round(start + t, 3)))
-        gap = ts.gap_between if i < len(clips_audio) - 1 else ts.tail
-        out = crossjoin(out, rt.take(gap + 2 * ts.crossfade), xf)
+    out = crossjoin(out, rt.take(ts.tail + 2 * ts.crossfade), xf)
     tail = int(min(0.8, ts.tail) * sr)
     out[-tail:] *= np.linspace(1, 0, tail) ** 2
     prog.audio = out
     return prog
 
 
-def clip_plan(clip, A, edits, xf: float, dur: float) -> tuple[float, float, list[tuple[float, float]]]:
-    """Kept range [a0, b0] of a source and the merged removals inside it (seconds)."""
-    a0 = max(clip.start, A.speech_on - 0.02)
-    b0 = min(clip.end, A.speech_off + 0.08, dur)
+def clip_plan(clip, A, edits, xf: float, dur: float, lead: float = LEAD_PAD,
+              tail: float = TAIL_PAD) -> tuple[float, float, list[tuple[float, float]]]:
+    """Kept range [a0, b0] of a source and the merged removals inside it (seconds).
+    `lead` / `tail`: silence kept before the first and after the last word (see edge_pads)."""
+    a0 = max(clip.start, A.speech_on - lead)
+    b0 = min(clip.end, A.speech_off + tail, dur)
     rem: list[tuple[float, float]] = []
     for e in edits:
         if isinstance(e, PauseEdit):
@@ -204,14 +244,15 @@ def map_time(t: float, a0: float, removals: list[tuple[float, float]], xf: float
 def timeline_map(p: Project) -> dict[str, tuple[float, float, float, list]]:
     """Without loading audio: per source (clip start in program, a0, b0, removals)."""
     ts = p.timeline_settings
+    pads = edge_pads(p)
     out, t = {}, ts.lead_in - ts.crossfade
     for i, clip in enumerate(p.timeline):
         A = p.analysis[clip.source]
-        a0, b0, rem = clip_plan(clip, A, p.edits_for(clip.source), ts.crossfade, p.source(clip.source).duration)
+        a0, b0, rem = clip_plan(clip, A, p.edits_for(clip.source), ts.crossfade, p.source(clip.source).duration,
+                                *pads[i])
         start = t
         seg = (b0 - a0) - sum(ce - cs for cs, ce in rem) - ts.crossfade * len(rem)
-        gap = ts.gap_between if i < len(p.timeline) - 1 else ts.tail
-        t = start + seg + gap
+        t = start + seg - ts.crossfade         # the next clip starts inside this one's crossfade
         out[clip.source] = (start, a0, b0, rem)
     return out
 

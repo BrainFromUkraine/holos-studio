@@ -550,17 +550,33 @@ fn sync_command(p: &Paths) -> Command {
     cmd
 }
 
-/// The file uv could not replace because another program has it open, from a line of uv's output such as
-/// ``error: failed to remove file `C:\…\site-packages\../../Scripts/holos.exe`: The process cannot access the
-/// file because it is being used by another process. (os error 32)``.
+/// The file uv could not replace because another program has it open, from a line of uv's output. Seen on Windows:
+/// ``failed to remove file `C:\…\site-packages\../../Scripts/holos.exe`: … being used by another process. (os error 32)``
+/// and ``Failed to persist temporary file to C:\…\site-packages\..\..\Scripts\holos.exe: … Access is denied. (os error 5)``.
 fn locked_path(line: &str) -> Option<PathBuf> {
-    if !(line.contains("os error 32") || line.contains("being used by another process")) {
+    const BUSY: [&str; 4] = ["(os error 32)", "(os error 5)", "being used by another process", "Access is denied"];
+    if !BUSY.iter().any(|m| line.contains(m)) {
         return None;
     }
-    let a = line.find('`')?;
-    let rest = &line[a + 1..];
-    let b = rest.find('`')?;
-    Some(normalize(Path::new(&rest[..b])))
+    path_in(line).map(|p| normalize(Path::new(p)))
+}
+
+/// The first file path in an error line: `quoted`, or a Windows path from its drive letter up to the next ": ".
+fn path_in(line: &str) -> Option<&str> {
+    if let Some(a) = line.find('`') {
+        if let Some(b) = line[a + 1..].find('`') {
+            return Some(&line[a + 1..a + 1 + b]);
+        }
+    }
+    let bytes = line.as_bytes();
+    for i in 0..bytes.len().saturating_sub(2) {
+        let starts = bytes[i].is_ascii_alphabetic() && bytes[i + 1] == b':' && (bytes[i + 2] == b'\\' || bytes[i + 2] == b'/');
+        if starts && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric()) {
+            let rest = &line[i..];
+            return Some(rest[..rest.find(": ").unwrap_or(rest.len())].trim_end());
+        }
+    }
+    None
 }
 
 /// Resolve `.` and `..` without touching the disk (uv prints paths like `site-packages\../../Scripts/holos.exe`).
@@ -769,6 +785,12 @@ mod tests {
                     access the file because it is being used by another process. (os error 32)";
         assert_eq!(locked_path(line), Some(PathBuf::from("/d/env/Scripts/holos.exe")));
         assert_eq!(locked_path("error: failed to fetch `https://x` (os error 10060)"), None);
+        let persist = r"Caused by: Failed to persist temporary file to C:\Users\r\env\Lib\site-packages\..\..\Scripts\holos.exe: failed to persist temporary file: Access is denied. (os error 5)";
+        assert_eq!(path_in(persist), Some(r"C:\Users\r\env\Lib\site-packages\..\..\Scripts\holos.exe"));
+        assert!(locked_path(persist).is_some());
+        #[cfg(windows)]
+        assert_eq!(locked_path(persist), Some(PathBuf::from(r"C:\Users\r\env\Scripts\holos.exe")));
+        assert_eq!(locked_path(r"Caused by: failed to read C:\x\y.whl: (os error 50)"), None);
         assert_eq!(locked_path("Prepared 1 package in 877ms"), None);
     }
 

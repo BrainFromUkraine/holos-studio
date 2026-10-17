@@ -133,6 +133,11 @@ impl Paths {
     fn holos(&self) -> PathBuf {
         venv_script(&self.env(), "holos")
     }
+    /// The environment's Python. Claude Desktop runs `python -m holos mcp` with it: uv never rewrites it on an
+    /// engine update (it does rewrite the `holos` launcher, which Windows will not replace while it runs).
+    fn python(&self) -> PathBuf {
+        venv_script(&self.env(), "python")
+    }
     fn marker(&self) -> PathBuf {
         self.data.join("engine-setup.json")
     }
@@ -238,6 +243,11 @@ impl EngineManager {
         if read_marker(&p) != Some(hash.clone()) || !p.holos().is_file() {
             self.setup(app, generation, &p, &hash)?;
         }
+        if p.python().is_file() {
+            for msg in fix_claude_configs(&p.holos(), &p.python()) {
+                self.line(app, generation, msg, false);
+            }
+        }
         self.run_engine(app, generation, &p)
     }
 
@@ -259,6 +269,7 @@ impl EngineManager {
         // replace in use ("os error 32"). Windows will not delete a running program but does let it be renamed:
         // move it aside and run uv again. The running program is not disturbed; the next setup deletes the old file.
         let mut attempt = 0;
+        let mut stopped = false;
         loop {
             attempt += 1;
             self.lock().sync_lines.clear();
@@ -272,18 +283,29 @@ impl EngineManager {
             };
             match locked {
                 Some(file) if attempt < SYNC_ATTEMPTS && file.starts_with(normalize(Path::new(&plain(&p.env())))) => {
-                    match move_aside(&file) {
-                        Ok(_) => self.line(
+                    if move_aside(&file).is_ok() {
+                        self.line(app, generation, format!("In use by another program, moved aside: {}", show(&file)), true);
+                    } else if !stopped {
+                        // The holos.exe launcher keeps its own file open, so it cannot even be renamed. Stop what runs
+                        // from our data folder (Claude Desktop's Holos connection — our engine is not running yet).
+                        stopped = true;
+                        let names = stop_processes_under(&p.data);
+                        self.line(
                             app,
                             generation,
-                            format!("In use by another program (Claude Desktop?), moved aside: {}", show(&file)),
+                            format!(
+                                "{} was in use by Claude Desktop's Holos connection; stopped it ({names}). Restart Claude Desktop to reconnect.",
+                                show(&file)
+                            ),
                             true,
-                        ),
-                        Err(e) => return Err(format!(
+                        );
+                        thread::sleep(Duration::from_millis(1500));
+                    } else {
+                        return Err(format!(
                             "A file of the engine is in use by another program and could not be replaced. Quit Claude Desktop \
-                             (including its tray icon) and press Try again. ({}: {e})",
+                             (including its tray icon) and press Try again. ({})",
                             show(&file)
-                        )),
+                        ));
                     }
                 }
                 Some(file) => {
@@ -490,8 +512,8 @@ impl EngineManager {
         } else {
             let p = Paths::resolve(app)?;
             serde_json::json!({
-                "command": plain(&p.holos()),
-                "args": ["mcp"],
+                "command": plain(&p.python()),
+                "args": ["-m", "holos", "mcp"],
                 "env": { "HOLOS_FFMPEG": plain(&p.ffmpeg) },
             })
         };
@@ -529,6 +551,92 @@ pub fn mcp_config(app: AppHandle, engine: State<'_, EngineManager>) -> Result<St
 }
 
 // ---- helpers ----------------------------------------------------------------------------------------------------
+
+/// Claude Desktop config files that may exist on this machine (regular and Microsoft Store installs).
+fn claude_config_paths() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        out.push(PathBuf::from(appdata).join("Claude").join("claude_desktop_config.json"));
+    }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        if let Ok(entries) = fs::read_dir(PathBuf::from(local).join("Packages")) {
+            for e in entries.flatten() {
+                if e.file_name().to_string_lossy().starts_with("Claude_") {
+                    out.push(e.path().join("LocalCache").join("Roaming").join("Claude").join("claude_desktop_config.json"));
+                }
+            }
+        }
+    }
+    out.into_iter().filter(|p| p.is_file()).collect()
+}
+
+/// Rewrite Claude Desktop entries that start this installation's `holos.exe mcp` to `python -m holos mcp`.
+/// Only such entries change (everything else in the file stays as it is); a backup is written first.
+/// Returns log lines.
+fn fix_claude_configs(holos: &Path, python: &Path) -> Vec<String> {
+    let mut log = Vec::new();
+    for cfg in claude_config_paths() {
+        let Ok(text) = fs::read_to_string(&cfg) else { continue };
+        let Some(new) = rewrite_claude_config(&text, holos, python) else { continue };
+        let backup = cfg.with_extension("json.holos-backup");
+        let res = fs::copy(&cfg, &backup).and_then(|_| fs::write(&cfg, new));
+        log.push(match res {
+            Ok(()) => format!(
+                "Claude Desktop config updated: Holos now starts as `python -m holos mcp`, so engine updates work while Claude Desktop runs ({}; backup {}). Restart Claude Desktop once.",
+                show(&cfg),
+                show(&backup)
+            ),
+            Err(e) => format!("Could not update the Claude Desktop config ({}: {e})", show(&cfg)),
+        });
+    }
+    log
+}
+
+/// The new config text if any `mcpServers` entry runs `holos` with args `["mcp"]`, else None.
+fn rewrite_claude_config(text: &str, holos: &Path, python: &Path) -> Option<String> {
+    let mut cfg: serde_json::Value = serde_json::from_str(text.trim_start_matches('\u{feff}')).ok()?;
+    let same = |a: &str, b: &Path| a.replace('/', "\\").eq_ignore_ascii_case(&plain(b).replace('/', "\\"));
+    let mut changed = false;
+    for (_, server) in cfg.get_mut("mcpServers")?.as_object_mut()?.iter_mut() {
+        let Some(obj) = server.as_object_mut() else { continue };
+        let runs_holos = obj.get("command").and_then(|c| c.as_str()).is_some_and(|c| same(c, holos));
+        let args_mcp = obj.get("args").and_then(|a| a.as_array()).is_some_and(|a| a.len() == 1 && a[0] == "mcp");
+        if runs_holos && args_mcp {
+            obj.insert("command".into(), serde_json::Value::String(plain(python)));
+            obj.insert("args".into(), serde_json::json!(["-m", "holos", "mcp"]));
+            changed = true;
+        }
+    }
+    if !changed {
+        return None;
+    }
+    serde_json::to_string_pretty(&cfg).ok().map(|t| t + "\n")
+}
+
+/// Stop every process whose program lives in `dir` (Windows). Returns their names for the log.
+fn stop_processes_under(dir: &Path) -> String {
+    if !cfg!(windows) {
+        return String::new();
+    }
+    let mut d = plain(dir);
+    if !d.ends_with('\\') {
+        d.push('\\');
+    }
+    let script = format!(
+        "$d='{}'; Get-CimInstance Win32_Process | Where-Object {{ $_.ExecutablePath -and $_.ExecutablePath.StartsWith($d, [StringComparison]::OrdinalIgnoreCase) }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.Name }}",
+        d.replace('\'', "''")
+    );
+    let mut cmd = Command::new("powershell");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
+    winproc::hide_window(&mut cmd);
+    match cmd.output() {
+        Ok(o) => {
+            let names: Vec<String> = String::from_utf8_lossy(&o.stdout).lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect();
+            if names.is_empty() { "nothing found".into() } else { names.join(", ") }
+        }
+        Err(e) => format!("powershell: {e}"),
+    }
+}
 
 /// `uv sync` of the bundled engine into `<data>/env`.
 fn sync_command(p: &Paths) -> Command {
@@ -792,6 +900,25 @@ mod tests {
         assert_eq!(locked_path(persist), Some(PathBuf::from(r"C:\Users\r\env\Scripts\holos.exe")));
         assert_eq!(locked_path(r"Caused by: failed to read C:\x\y.whl: (os error 50)"), None);
         assert_eq!(locked_path("Prepared 1 package in 877ms"), None);
+    }
+
+    #[test]
+    fn claude_config_entry_is_moved_to_python() {
+        let holos = Path::new(r"C:\Users\o\AppData\Local\com.brainfromukraine.holos\env\Scripts\holos.exe");
+        let python = Path::new(r"C:\Users\o\AppData\Local\com.brainfromukraine.holos\env\Scripts\python.exe");
+        let text = r#"{"mcpServers": {"holos-studio": {"command": "C:\\Users\\o\\AppData\\Local\\com.brainfromukraine.holos\\env\\Scripts\\holos.exe", "args": ["mcp"], "env": {"HOLOS_FFMPEG": "x"}}, "kicad": {"command": "kicad-mcp", "args": []}}, "theme": "dark"}"#;
+        let new = rewrite_claude_config(text, holos, python).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&new).unwrap();
+        assert_eq!(v["mcpServers"]["holos-studio"]["command"], plain(python));
+        assert_eq!(v["mcpServers"]["holos-studio"]["args"], serde_json::json!(["-m", "holos", "mcp"]));
+        assert_eq!(v["mcpServers"]["holos-studio"]["env"]["HOLOS_FFMPEG"], "x");
+        assert_eq!(v["mcpServers"]["kicad"]["command"], "kicad-mcp");
+        assert_eq!(v["theme"], "dark");
+        // other files, already updated configs and foreign holos installs are left alone
+        assert!(rewrite_claude_config(&new, holos, python).is_none());
+        assert!(rewrite_claude_config(r#"{"mcpServers": {"h": {"command": "D:\\other\\holos.exe", "args": ["mcp"]}}}"#, holos, python).is_none());
+        assert!(rewrite_claude_config("not json", holos, python).is_none());
+        assert!(rewrite_claude_config(r#"{"theme": "dark"}"#, holos, python).is_none());
     }
 
     #[test]

@@ -465,12 +465,10 @@ def create_app(token: str | None = None) -> FastAPI:
                 "mcp_config": mcp_config(), "version": __version__}
 
     def mcp_config() -> dict:
-        """Ready-to-paste entry for Claude Desktop's claude_desktop_config.json: this very engine, `holos mcp`."""
-        import shutil
+        """Ready-to-paste entry for Claude Desktop's claude_desktop_config.json: this very engine, `python -m holos mcp`
+        (not the holos.exe launcher, which an engine update has to replace while Claude Desktop keeps it running)."""
         import sys
-        bindir = Path(sys.executable).parent
-        exe = next((str(c) for c in (bindir / "holos.exe", bindir / "holos") if c.is_file()), None) or shutil.which("holos")
-        entry: dict[str, Any] = {"command": exe or "holos", "args": ["mcp"]}
+        entry: dict[str, Any] = {"command": sys.executable, "args": ["-m", "holos", "mcp"]}
         from .io import FFmpegError, ffmpeg_path
         try:
             entry["env"] = {"HOLOS_FFMPEG": ffmpeg_path()}

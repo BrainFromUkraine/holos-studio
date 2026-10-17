@@ -26,7 +26,10 @@ Running from source, the configuration looks like this (adjust the path):
 }
 ```
 
-With the installed app the **Settings** screen already shows the right configuration for it.
+With the installed app the **Settings** screen already shows the right configuration for it: the engine's own
+`python.exe -m holos mcp`. (Older versions used `holos.exe mcp`; the app moves such an entry in
+`claude_desktop_config.json` to the new form by itself and keeps a `.holos-backup` copy, because Windows does not
+let an update replace `holos.exe` while Claude Desktop is running it.)
 
 Any other MCP client: run `holos mcp` (or `uv --directory <repo>/engine run holos mcp`) over stdio.
 

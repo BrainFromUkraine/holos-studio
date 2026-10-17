@@ -1,6 +1,7 @@
 # Windows smoke test of a built installer: silent per-user install → first run (uv setup) → engine answers
 # → graceful close stops the engine → relaunch → hard kill of the app stops the engine (Job Object)
-# → engine update while `holos.exe mcp` (Claude Desktop) is running: the busy file is moved aside, setup succeeds.
+# → engine updates while Claude Desktop is connected (old holos.exe entry is stopped and the config moved to
+#   `python -m holos mcp`; a `python -m holos mcp` connection survives the update).
 #
 #   pwsh scripts/smoke-test.ps1 -Installer "app/src-tauri/target/release/bundle/nsis/Holos Studio_0.2.0_x64-setup.exe"
 #
@@ -78,29 +79,58 @@ try {
     Wait-NoEngine "killing the app"
     Note "app killed: engine stopped with it"
 
-    # Engine update while Claude Desktop holds holos.exe: run `holos.exe mcp` the way Claude Desktop does (stdin kept
-    # open), make the next start reinstall the engine package, and check that setup moves the busy file aside.
+    # Engine updates while Claude Desktop is connected (it keeps `holos mcp` running with stdin open).
+    function Start-Mcp([string]$file, [string]$arguments) {
+        $psi = New-Object Diagnostics.ProcessStartInfo $file, $arguments
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.CreateNoWindow = $true
+        $p = [Diagnostics.Process]::Start($psi)
+        Start-Sleep -Seconds 5
+        if ($p.HasExited) { throw "$file $arguments exited (code $($p.ExitCode))" }
+        return $p
+    }
+    function Update-Engine([string]$what) {
+        # The next start reinstalls the engine package, as after an update with new engine code.
+        Remove-Item (Join-Path $Data "engine-setup.json") -Force
+        Get-ChildItem (Join-Path $Data "env\Lib\site-packages") -Directory -Filter "holos_engine-*.dist-info" | Remove-Item -Recurse -Force
+        $sw.Restart()
+        $a = Start-Process -FilePath $exe.FullName -PassThru
+        $null = Wait-Engine $a 10
+        Note "$what — engine updated and ready in $([int]$sw.Elapsed.TotalSeconds) s"
+        return $a
+    }
     $holos = Join-Path $Data "env\Scripts\holos.exe"
-    $psi = New-Object Diagnostics.ProcessStartInfo $holos, "mcp"
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardInput = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.CreateNoWindow = $true
-    $mcp = [Diagnostics.Process]::Start($psi)
-    Start-Sleep -Seconds 5
-    if ($mcp.HasExited) { throw "holos.exe mcp exited (code $($mcp.ExitCode))" }
-    Remove-Item (Join-Path $Data "engine-setup.json") -Force
-    Get-ChildItem (Join-Path $Data "env\Lib\site-packages") -Directory -Filter "holos_engine-*.dist-info" | Remove-Item -Recurse -Force
-    $sw.Restart()
-    $app = Start-Process -FilePath $exe.FullName -PassThru
-    $null = Wait-Engine $app 10
-    $moved = Get-ChildItem (Join-Path $Data "env") -Recurse -File -Filter "*.holos-old" -ErrorAction SilentlyContinue
-    if (-not $moved) { throw "setup succeeded but nothing was moved aside — the busy-file path was not exercised" }
-    if ($mcp.HasExited) { throw "the running holos.exe mcp was stopped by the update" }
-    Note "update while Claude Desktop runs holos.exe: setup moved $($moved.Name -join ', ') aside, engine ready in $([int]$sw.Elapsed.TotalSeconds) s, MCP process kept running"
+    $python = Join-Path $Data "env\Scripts\python.exe"
+
+    # 1) Old setup: Claude Desktop runs holos.exe (which Windows will not let anyone replace or rename while it runs).
+    #    The update must still succeed, and the Claude Desktop entry must move to `python -m holos mcp`.
+    $cfgDir = Join-Path $env:APPDATA "Claude"
+    New-Item -ItemType Directory -Force $cfgDir | Out-Null
+    $cfg = Join-Path $cfgDir "claude_desktop_config.json"
+    @{ mcpServers = @{ "holos-studio" = @{ command = $holos; args = @("mcp") }; other = @{ command = "x"; args = @() } }; theme = "dark" } |
+        ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 $cfg
+    $old = Start-Mcp $holos "mcp"
+    $app = Update-Engine "old Claude Desktop entry (holos.exe mcp running)"
+    $c = Get-Content $cfg -Raw | ConvertFrom-Json
+    $h = $c.mcpServers."holos-studio"
+    if ($h.command -ne $python -or (($h.args) -join " ") -ne "-m holos mcp") { throw "Claude Desktop config not updated: $($h.command) $($h.args -join ' ')" }
+    if ($c.mcpServers.other.command -ne "x" -or $c.theme -ne "dark") { throw "Claude Desktop config: other settings changed" }
+    if (-not (Test-Path "$cfg.holos-backup")) { throw "no backup of the Claude Desktop config" }
+    Note "Claude Desktop config moved to python -m holos mcp (backup kept); the old holos.exe connection was stopped: $($old.HasExited)"
+    if (-not $old.HasExited) { $old.Kill() }
+    Stop-Process -Id $app.Id -Force
+    Wait-NoEngine "the first update test"
+
+    # 2) New setup: Claude Desktop runs `python -m holos mcp`. The update must not touch it.
+    $mcp = Start-Mcp $python "-m holos mcp"
+    $app = Update-Engine "new Claude Desktop entry (python -m holos mcp running)"
+    if ($mcp.HasExited) { throw "the running python -m holos mcp was stopped by the update" }
+    Note "update with Claude Desktop connected: MCP process kept running"
     $mcp.Kill()
     Stop-Process -Id $app.Id -Force
-    Wait-NoEngine "the update test"
+    Wait-NoEngine "the second update test"
 }
 catch {
     $log = Join-Path $Data "engine.log"

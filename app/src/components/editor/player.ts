@@ -1,5 +1,6 @@
-// Plays the recordings straight from the engine, jumping over removed parts in "result" mode.
-// It previews the edit (cuts, pauses, trimmed silence); processing (EQ, compression, loudness) is heard after export.
+// Plays the recordings from the engine and jumps over the removed parts (cuts, pauses, trimmed silence), so every
+// edit is heard at once. "result": the processed copy of each recording (breaths, mouth clicks, voice chain,
+// loudness — made like the export, see engine/src/holos/preview.py). "original": the recordings as they are, whole.
 
 import { engine } from "@/lib/engine";
 import { keptPieces, type Timeline } from "@/lib/timeline";
@@ -12,6 +13,7 @@ export class Player {
   private plan: Piece[] = [];
   private idx = 0;
   private sid: string | null = null;
+  private url = "";
   private raf = 0;
   private stopAt: Pos | null = null;
   private tl: Timeline | null = null;
@@ -29,11 +31,30 @@ export class Player {
   setTimeline(tl: Timeline) {
     this.tl = tl;
     this.rebuild();
+    void this.reloadIfChanged();
   }
 
   setMode(m: "result" | "original") {
     this.mode = m;
     this.rebuild();
+    void this.reloadIfChanged();
+  }
+
+  private urlFor(sid: string): string {
+    const s = this.tl?.sources.find((x) => x.id === sid);
+    return engine.audioUrl(this.path, sid, this.mode === "result" ? s?.preview : undefined);
+  }
+
+  /** The sound of the recording being played changed (new processed copy, or the mode): continue in the new one. */
+  private async reloadIfChanged() {
+    const pos = this.position();
+    if (!pos || !this.playing || this.urlFor(pos.sid) === this.url) return;
+    try {
+      await this.load(pos.sid, pos.t);
+      if (this.playing) await this.audio.play();
+    } catch {
+      this.pause();
+    }
   }
 
   private rebuild() {
@@ -65,18 +86,31 @@ export class Player {
   }
 
   private async load(sid: string, t: number) {
-    if (this.sid !== sid) {
+    const url = this.urlFor(sid);
+    if (this.url !== url) {
       this.sid = sid;
-      this.audio.src = engine.assetUrl("audio", this.path, sid);
-      await new Promise<void>((res, rej) => {
-        const ok = () => { cleanup(); res(); };
-        const bad = () => { cleanup(); rej(new Error("audio")); };
-        const cleanup = () => { this.audio.removeEventListener("loadedmetadata", ok); this.audio.removeEventListener("error", bad); };
-        this.audio.addEventListener("loadedmetadata", ok);
-        this.audio.addEventListener("error", bad);
-      });
+      try {
+        await this.open(url);
+      } catch (e) {
+        // the processed copy could not be made: play the recording itself rather than nothing
+        const raw = engine.audioUrl(this.path, sid);
+        if (url === raw) throw e;
+        await this.open(raw);
+      }
     }
     this.audio.currentTime = t;
+  }
+
+  private open(url: string): Promise<void> {
+    this.url = url;
+    this.audio.src = url;
+    return new Promise<void>((res, rej) => {
+      const ok = () => { cleanup(); res(); };
+      const bad = () => { cleanup(); rej(new Error("audio")); };
+      const cleanup = () => { this.audio.removeEventListener("loadedmetadata", ok); this.audio.removeEventListener("error", bad); };
+      this.audio.addEventListener("loadedmetadata", ok);
+      this.audio.addEventListener("error", bad);
+    });
   }
 
   /** Play from a source position; `until` stops there (used for "listen to this edit"). */
@@ -149,5 +183,6 @@ export class Player {
   destroy() {
     this.pause();
     this.audio.src = "";
+    this.url = "";
   }
 }

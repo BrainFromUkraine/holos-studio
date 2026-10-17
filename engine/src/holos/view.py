@@ -76,6 +76,10 @@ def timeline(p: Project, path: str | Path | None = None) -> dict:
         s = p.source(clip.source)
         row = {"id": s.id, "name": Path(s.path).name, "duration": s.duration, "offset": round(off, 3),
                "sr": s.sr, "channels": s.channels}
+        if path is not None and clip.source in p.analysis:
+            from . import preview
+            row["preview"] = preview.preview_key(p, clip.source)
+            row["preview_ready"] = preview.is_ready(path, p, clip.source)
         if clip.source in tm:
             start, a0, b0, rem = tm[clip.source]
             row.update(prog_start=round(start, 4), a0=round(a0, 4), b0=round(b0, 4),

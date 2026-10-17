@@ -87,11 +87,14 @@ def create_project(path: str | Path, files: Iterable[str | Path], name: str | No
     return p, skipped
 
 
-def analyze_project(p: Project, path: str | Path, progress: Progress = _noop) -> dict:
-    """Breaths, pauses, drop-outs, loudness. Which of them are applied is decided by `p.automation`."""
+def analyze_project(p: Project, path: str | Path, progress: Progress = _noop, apply: bool = True) -> dict:
+    """Breaths, pauses, drop-outs, loudness. Which of them are applied is decided by `p.automation`
+    (right away, or with `apply=False` only on Auto-edit: new finds then wait as suggestions).
+    Edits the user or Claude changed by hand are kept; a new find overlapping one of them is dropped."""
     from .analysis import analyze_source
     from .io import load_mono
-    p.edits = [e for e in p.edits if e.type not in ANALYSIS_TYPES]
+    kept = [e for e in p.edits if e.type in ANALYSIS_TYPES and e.touched]
+    p.edits = [e for e in p.edits if e.type not in ANALYSIS_TYPES] + kept
     n = len(p.sources)
     t0 = time.time()
     counts = {t: 0 for t in ANALYSIS_TYPES}
@@ -101,11 +104,19 @@ def analyze_project(p: Project, path: str | Path, progress: Progress = _noop) ->
         A, edits = analyze_source(x, sr, s.id, p.analysis_settings)
         from .analysis import BREATH_VERSION
         p.analysis_settings.breath_version = BREATH_VERSION
+        mine = [k for k in kept if k.source == s.id]
+        ids = {e.id for e in p.edits}
         for e in edits:
+            if any(k.type == e.type and k.start < e.end and k.end > e.start for k in mine):
+                continue
+            while e.id in ids:
+                e.id += "n"
+            ids.add(e.id)
             counts[e.type] += 1
+            p.edits.append(e)
         p.analysis[s.id] = A
-        p.edits.extend(edits)
-    automation.apply(p)
+    if apply:
+        automation.apply(p)
     p.save(path)
     progress("analyze", n, n, "done")
     return {"seconds": round(time.time() - t0, 1), **counts}
@@ -191,7 +202,8 @@ def transcribe_project(p: Project, path: str | Path, progress: Progress = _noop)
     return {"seconds": round(time.time() - t0, 1), "words": sum(len(w) for w, _ in res.values())}
 
 
-def suggest_project(p: Project, path: str | Path, use_audio: bool = True, progress: Progress = _noop) -> dict:
+def suggest_project(p: Project, path: str | Path, use_audio: bool = True, progress: Progress = _noop,
+                    apply: bool = True) -> dict:
     """Transcript-based edits (repeats, retakes, fillers…); `p.automation.kinds` decides which are cut."""
     from .analysis.features import frame_features
     from .io import load_mono
@@ -218,7 +230,8 @@ def suggest_project(p: Project, path: str | Path, use_audio: bool = True, progre
         if prev is not None:
             e.status, e.touched = prev.status, True
     p.edits = [e for e in p.edits if not (isinstance(e, CutEdit) and e.kind in SUGGEST_KINDS)] + new
-    automation.apply(p)
+    if apply:
+        automation.apply(p)
     p.save(path)
     progress("suggest", n, n, "done")
     by: dict[str, int] = {}
@@ -238,7 +251,36 @@ def process_project(path: str | Path, progress: Progress = _noop) -> dict:
         progress("transcribe", 0, 0, "skipped: speech recognition not installed (uv sync --extra asr)")
         result["transcribe"] = {"skipped": True}
     result["view"] = prepare_view(p, path, progress)
+    from . import preview
+    result["previews"] = preview.prepare(Project.load(path), path, progress)   # the editor plays "Result" at once
     return result
+
+
+def analyze_again(path: str | Path, progress: Progress = _noop) -> dict:
+    """"Analyze" in the editor: find breaths, pauses, drop-outs, repeats, retakes and fillers again with the current
+    detectors. Hand edits stay; new finds are not applied until Auto-edit. One step in the undo history."""
+    from . import editing
+    p = Project.load(path)
+    before = editing._snap(p, "Analyze")
+    result = {"analyze": analyze_project(p, path, progress, apply=False)}
+    if asr_available():
+        result["transcribe"] = transcribe_project(p, path, progress)        # cached per recording
+        result["suggest"] = suggest_project(p, path, True, progress, apply=False)
+    editing._commit(p, path, before)
+    result["view"] = prepare_view(p, path, progress)
+    return result
+
+
+def auto_edit(path: str | Path, progress: Progress = _noop) -> dict:
+    """"Auto-edit" in the editor: apply the Automation settings to everything found (hand edits stay), then make the
+    processed copies the editor plays as "Result". One step in the undo history."""
+    from . import editing, preview
+    p = Project.load(path)
+    before = editing._snap(p, "Auto-edit")
+    counts = automation.apply(p)
+    editing._commit(p, path, before)
+    made = preview.prepare(p, path, progress)
+    return {"applied": counts, "previews": made}
 
 
 def prepare_view(p: Project, path: str | Path, progress: Progress = _noop) -> dict:

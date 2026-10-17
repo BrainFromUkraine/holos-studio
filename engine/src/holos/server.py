@@ -328,12 +328,45 @@ def create_app(token: str | None = None) -> FastAPI:
         return {"hop": view.LOUD_HOP, "values": view.loudness(p, path, source)}
 
     @app.get("/api/projects/audio", dependencies=[Depends(auth)])
-    def get_audio(path: str, source: str) -> FileResponse:
+    def get_audio(path: str, source: str, processed: bool = False) -> FileResponse:
+        """A recording for the editor's player; `processed` = the "Result" copy (made now if missing)."""
+        from . import preview
         p = load(path)
         s = source_of(p, source)
         if not Path(s.path).is_file():
             raise HTTPException(404, f"recording missing: {s.path}")
+        if processed and source in p.analysis:
+            return FileResponse(str(preview.ensure(p, path, source)), media_type="audio/wav",
+                                headers={"Cache-Control": "max-age=86400"})   # the URL carries the version key
         return FileResponse(s.path, media_type="audio/wav")
+
+    # processed copies are re-made in the background after a change, so "Result" is ready when it is played
+    preview_pool = ThreadPoolExecutor(max_workers=1)
+    preview_pending: set[str] = set()
+
+    def refresh_previews(path: str) -> None:
+        if path in preview_pending:
+            return
+        preview_pending.add(path)
+
+        def work() -> None:
+            from . import preview
+            try:
+                preview_pending.discard(path)
+                preview.prepare(Project.load(path), path)
+            except Exception:                       # best effort: the player makes a copy on demand anyway
+                pass
+        preview_pool.submit(work)
+
+    @app.post("/api/projects/analyze", dependencies=[Depends(auth)])
+    def analyze(body: ProjectIn) -> dict:
+        load(body.path)
+        return run_job("analyze", body.path, lambda progress: ops.analyze_again(body.path, progress)).snapshot()
+
+    @app.post("/api/projects/autoedit", dependencies=[Depends(auth)])
+    def autoedit(body: ProjectIn) -> dict:
+        load(body.path)
+        return run_job("autoedit", body.path, lambda progress: ops.auto_edit(body.path, progress)).snapshot()
 
     @app.post("/api/projects/edit", dependencies=[Depends(auth)])
     def edit(body: EditIn) -> dict:
@@ -369,6 +402,7 @@ def create_app(token: str | None = None) -> FastAPI:
                     raise editing.EditError(f"unknown op: {body.op}")
             except editing.EditError as e:
                 raise HTTPException(400, str(e))
+        refresh_previews(body.path)
         return {**timeline_payload(p, body.path), **info}
 
     @app.put("/api/projects/chapters", dependencies=[Depends(auth)])
@@ -442,6 +476,7 @@ def create_app(token: str | None = None) -> FastAPI:
                 editing.set_automation(p, body.path, body.changes)
             except Exception as e:
                 raise HTTPException(400, str(e))
+        refresh_previews(body.path)
         return timeline_payload(p, body.path)
 
     @app.get("/api/automation/defaults", dependencies=[Depends(auth)])

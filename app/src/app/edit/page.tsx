@@ -66,6 +66,8 @@ export default function EditorPage() {
   const [splits, setSplits] = useState<number[]>([]);
   const [view, setView] = useState<View>({ x0: 0, pps: 1 });
   const [vzoom, setVzoom] = useState(1); // waveform height multiplier (vertical zoom)
+  const [listen, setListen] = useState<"result" | "original">("result");
+  const [job, setJob] = useState<{ kind: "analyze" | "autoedit"; stage: string; done: number; total: number } | null>(null);
   const [T, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -121,6 +123,39 @@ export default function EditorPage() {
   }, [path]);
 
   useEffect(() => { if (tl) player.current?.setTimeline(tl); }, [tl]);
+  useEffect(() => { player.current?.setMode(listen); }, [listen, path]);
+
+  // ---- Analyze / Auto-edit (background jobs in the engine) ----------------------------------------
+  const runJob = async (kind: "analyze" | "autoedit") => {
+    if (!path || job) return;
+    setErr(null);
+    setJob({ kind, stage: "", done: 0, total: 0 });
+    try {
+      const j = kind === "analyze" ? await engine.analyze(path) : await engine.autoEdit(path);
+      engine.watch(j.id, async (u) => {
+        setJob({ kind, stage: u.stage, done: u.done, total: u.total });
+        if (u.state === "done" || u.state === "error") {
+          if (u.state === "error") setErr(u.error ?? t("Something went wrong."));
+          try {
+            setTl(await engine.timeline(path));
+            await refreshStamp(path);
+          } catch {}
+          setJob(null);
+        }
+      });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      setJob(null);
+    }
+  };
+  const JOB_STAGE: Record<string, string> = {
+    analyze: "Analyzing", transcribe: "Recognizing speech", suggest: "Finding repeats", view: "Preparing the view",
+    preview: "Preparing the sound",
+  };
+  const jobText = job
+    ? `${t(JOB_STAGE[job.stage] ?? (job.kind === "analyze" ? "Analyzing" : "Auto-editing"))}${job.total > 0 ? ` ${Math.min(job.done, job.total)}/${job.total}` : ""}…`
+    : "";
+  const resultPending = Boolean(tl?.sources.some((s) => s.preview && !s.preview_ready));
 
   useEffect(() => {
     const el = area.current;
@@ -317,7 +352,7 @@ export default function EditorPage() {
           ))}
         </div>
         <button className="tool" style={{ border: "1px solid var(--border)", color: snap ? "var(--core)" : undefined, background: snap ? "var(--sel-row)" : undefined }} aria-pressed={snap}
-          title={t("Moves cut edges to the quietest point nearby")} onClick={() => setSnap((s) => !s)}>{t("Snap to silence")}</button>
+          title={t("Moves cut edges to the quietest point nearby")} onClick={() => setSnap((s) => !s)}><span style={{ whiteSpace: "nowrap" }}>{t("Snap to silence")}</span></button>
         <div role="group" aria-label={t("History")} style={{ display: "flex", gap: 4 }}>
           <button className="iconbtn" aria-label={`${t("Undo")} (Ctrl+Z)`} title={`${tl?.history.undo_label ? t("Undo: {action}", { action: t(tl.history.undo_label) }) : t("Undo")} (Ctrl+Z)`} disabled={!tl?.history.can_undo || busy} onClick={() => run({ op: "undo" })}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M9 14L4 9l5-5" /><path d="M4 9h10a6 6 0 010 12h-3" /></svg>
@@ -339,6 +374,13 @@ export default function EditorPage() {
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M17 2l3 3-3 3" /><path d="M4 11V9a4 4 0 014-4h12" /><path d="M7 22l-3-3 3-3" /><path d="M20 13v2a4 4 0 01-4 4H4" /></svg>
           </button>
         </div>
+        <div role="radiogroup" aria-label={t("What to play")} className="seg" style={{ flex: "0 0 auto" }}>
+          <button role="radio" aria-checked={listen === "original"} title={t("Play the recordings as they are: no edits, no processing")}
+            onClick={() => setListen("original")} style={{ whiteSpace: "nowrap" }}>{t("Original")}</button>
+          <button role="radio" aria-checked={listen === "result"}
+            title={resultPending ? t("Play the edited and processed sound, as it will be exported (being prepared — the first play may take a few seconds)") : t("Play the edited and processed sound, as it will be exported")}
+            onClick={() => setListen("result")} style={{ whiteSpace: "nowrap" }}>{t("Result")}{resultPending ? " …" : ""}</button>
+        </div>
         <div style={{ padding: "2px 12px", background: "var(--lane)", border: "1px solid var(--border)", display: "flex", flexDirection: "column", minWidth: 160 }}>
           <span className="mono" style={{ fontSize: 19, color: "var(--bright)" }}>{fmtEp(T, true)}</span>
           <span className="mono muted" style={{ fontSize: 10.5 }}>{t("of {total}", { total: fmtEp(length) })}</span>
@@ -347,12 +389,12 @@ export default function EditorPage() {
           <label title={t("Horizontal zoom")} style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--text2)" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4" /></svg>
             <input type="range" aria-label={t("Horizontal zoom")} min={0} max={100} value={Number.isFinite(zoomLog(view.pps)) ? zoomLog(view.pps) : 0}
-              onChange={(e) => { const pps = fromZoomLog(Number(e.target.value)); const c = view.x0 + width / view.pps / 2; changeView({ pps, x0: c - width / pps / 2 }); }} style={{ width: 110 }} />
+              onChange={(e) => { const pps = fromZoomLog(Number(e.target.value)); const c = view.x0 + width / view.pps / 2; changeView({ pps, x0: c - width / pps / 2 }); }} style={{ width: 84 }} />
           </label>
           <label title={t("Vertical zoom")} style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--text2)" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4" /></svg>
             <input type="range" aria-label={t("Vertical zoom")} min={0} max={100} value={Math.round((Math.log(vzoom) / Math.log(MAX_VZOOM)) * 100)}
-              onChange={(e) => setVzoom(Math.pow(MAX_VZOOM, Number(e.target.value) / 100))} onDoubleClick={() => setVzoom(1)} style={{ width: 80 }} />
+              onChange={(e) => setVzoom(Math.pow(MAX_VZOOM, Number(e.target.value) / 100))} onDoubleClick={() => setVzoom(1)} style={{ width: 60 }} />
           </label>
           <Link href="/automation/" className="btn" style={{ height: 32, display: "flex", alignItems: "center", gap: 6, textDecoration: "none" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></svg>
@@ -363,6 +405,21 @@ export default function EditorPage() {
 
       {/* ---- what was done automatically ---- */}
       <div style={{ flex: "0 0 32px", display: "flex", alignItems: "center", gap: 18, padding: "0 14px", background: "#0d0f0d", borderBottom: "1px solid var(--border)", fontSize: 12, color: "var(--text2)", whiteSpace: "nowrap", overflow: "hidden" }}>
+        <div role="group" aria-label={t("Automatic editing")} style={{ display: "flex", alignItems: "center", gap: 6, flex: "0 0 auto", paddingRight: 12, borderRight: "1px solid var(--border)" }}>
+          <button className="tool" style={{ border: "1px solid var(--border)", minHeight: 24, height: 24, padding: "0 10px", fontSize: 12 }} disabled={!tl || Boolean(job) || busy}
+            title={t("Find breaths, pauses, mouth clicks, repeats and fillers again. Your hand edits stay; nothing is applied until Auto-edit.")}
+            onClick={() => runJob("analyze")}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="10" cy="10" r="6" /><path d="M15 15l6 6" /></svg>
+            {t("Analyze")}
+          </button>
+          <button className="tool" style={{ border: "1px solid var(--border)", color: "var(--core)", minHeight: 24, height: 24, padding: "0 10px", fontSize: 12 }} disabled={!tl || Boolean(job) || busy}
+            title={t("Apply the Automation settings to everything found and prepare the processed sound. Your hand edits stay.")}
+            onClick={() => runJob("autoedit")}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M4 20L15 9" /><path d="M14 4v3M19 9h-3M17.5 5.5l-2 2" /></svg>
+            {t("Auto-edit")}
+          </button>
+          {job && <span role="status" className="mono muted" style={{ fontSize: 11.5, whiteSpace: "nowrap" }}>{jobText}</span>}
+        </div>
         <span className="muted">{t("Done automatically:")}</span>
         {([["repeat", "repeats", "var(--cut)"], ["retake", "retakes", "var(--cut)"], ["filler", "fillers", "var(--cut)"], ["pause", "pauses", "#6a706a"], ["gain", "breaths", "var(--breath)"], ["fill", "drop-outs", "var(--dim)"]] as [string, string, string][]).map(([k, l, c]) => (
           <span key={k}><i style={{ display: "inline-block", width: 8, height: 8, background: c, marginRight: 6 }} />{t(l)} {counts[k === "gain" ? "breath" : k] ?? 0}</span>

@@ -119,6 +119,61 @@ def edge_pads(p: Project) -> list[tuple[float, float]]:
     return [(a, b) for a, b in pads]
 
 
+def process_source(p: Project, sid: str, fallback_room: list[np.ndarray] | None = None
+                   ) -> tuple[np.ndarray, list[np.ndarray], float]:
+    """One whole recording with everything that changes its sound but not its timing: level match, breath edits
+    (lowered or replaced with room tone), drop-outs filled with room tone. Used by the renderer (before the cuts)
+    and by the editor's "Result" playback, so both sound the same.
+
+    Returns the signal (same length as the recording), its own room-tone pieces and the level-match gain (dB).
+    `fallback_room`: room tone to use when this recording has none of its own.
+    """
+    sr = p.sample_rate
+    ts = p.timeline_settings
+    src = p.source(sid)
+    A = p.analysis[sid]
+    x, fsr = load_mono(src.path)
+    if fsr != sr:
+        raise ValueError(f"{src.path}: sample rate {fsr} != project {sr} (resampling not supported yet)")
+    g_db = (ts.level_match_lufs - A.loudness_lufs) if p.automation.level_match else 0.0
+    x = x * db2a(g_db)
+    edits = p.edits_for(sid)
+
+    # gain edits (breaths etc.)
+    env = np.ones(len(x))
+    for e in edits:
+        if isinstance(e, GainEdit) and not e.room:
+            a, b = int(e.start * sr), int(e.end * sr)
+            if b > a:
+                env[a:b] = np.minimum(env[a:b], _ramp_env(b - a, db2a(e.db), int(0.02 * sr)))
+    x = x * env
+
+    own = [x[int(s * sr):int(e * sr)].copy() for s, e in A.room_tone]
+    rt_local = RoomTone(own or list(fallback_room or []), sr, ts.crossfade)
+
+    # fill drop-outs with room tone
+    if rt_local:
+        for e in edits:
+            if isinstance(e, FillEdit):
+                a, b = int(e.start * sr), min(len(x), int(e.end * sr))
+                if b <= a:
+                    continue
+                L = b - a
+                x[a:b] += rt_local.take(L / sr + 0.01)[:L] * _fade_window(L, int(0.02 * sr))
+
+    # breaths to remove: crossfade to room tone (15 ms ramps), the timing stays
+    for e in edits:
+        if isinstance(e, GainEdit) and e.room:
+            a, b = int(e.start * sr), min(len(x), int(e.end * sr))
+            if b <= a:
+                continue
+            L = b - a
+            w = _fade_window(L, int(0.015 * sr))
+            fill = rt_local.take(L / sr + 0.01)[:L] if rt_local else x[a:b] * db2a(e.db)
+            x[a:b] = x[a:b] * (1 - w) + fill * w
+    return x, own, g_db
+
+
 def build_program(p: Project) -> Program:
     sr = p.sample_rate
     ts = p.timeline_settings
@@ -129,49 +184,11 @@ def build_program(p: Project) -> Program:
     pads = edge_pads(p)
 
     for ci, clip in enumerate(p.timeline):
-        src = p.source(clip.source)
-        A = p.analysis[clip.source]
-        x, fsr = load_mono(src.path)
-        if fsr != sr:
-            raise ValueError(f"{src.path}: sample rate {fsr} != project {sr} (resampling not supported yet)")
-        g_db = (ts.level_match_lufs - A.loudness_lufs) if p.automation.level_match else 0.0
-        prog.level_gain_db[clip.source] = round(g_db, 2)
-        x = x * db2a(g_db)
-        edits = p.edits_for(clip.source)
-
-        # gain edits (breaths etc.)
-        env = np.ones(len(x))
-        for e in edits:
-            if isinstance(e, GainEdit) and not e.room:
-                a, b = int(e.start * sr), int(e.end * sr)
-                if b > a:
-                    env[a:b] = np.minimum(env[a:b], _ramp_env(b - a, db2a(e.db), int(0.02 * sr)))
-        x = x * env
-
-        own = [x[int(s * sr):int(e * sr)].copy() for s, e in A.room_tone]
+        x, own, g_db = process_source(p, clip.source, rt_pieces)
         rt_pieces.extend(own)
-        rt_local = RoomTone(own or rt_pieces, sr, ts.crossfade)
-
-        # fill drop-outs with room tone
-        if rt_local:
-            for e in edits:
-                if isinstance(e, FillEdit):
-                    a, b = int(e.start * sr), min(len(x), int(e.end * sr))
-                    if b <= a:
-                        continue
-                    L = b - a
-                    x[a:b] += rt_local.take(L / sr + 0.01)[:L] * _fade_window(L, int(0.02 * sr))
-
-        # breaths to remove: crossfade to room tone (15 ms ramps), the timing stays
-        for e in edits:
-            if isinstance(e, GainEdit) and e.room:
-                a, b = int(e.start * sr), min(len(x), int(e.end * sr))
-                if b <= a:
-                    continue
-                L = b - a
-                w = _fade_window(L, int(0.015 * sr))
-                fill = rt_local.take(L / sr + 0.01)[:L] if rt_local else x[a:b] * db2a(e.db)
-                x[a:b] = x[a:b] * (1 - w) + fill * w
+        prog.level_gain_db[clip.source] = round(g_db, 2)
+        A = p.analysis[clip.source]
+        edits = p.edits_for(clip.source)
 
         a0, b0, removals = clip_plan(clip, A, edits, ts.crossfade, len(x) / sr, *pads[ci])
         pieces, cur = [], a0

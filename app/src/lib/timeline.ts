@@ -14,6 +14,8 @@ export type TlSource = {
   a0?: number; // kept range inside the recording
   b0?: number;
   removals?: [number, number][]; // merged removed ranges (cuts + pause excess), source seconds
+  preview?: string; // version key of the processed "Result" copy (changes when its sound changes)
+  preview_ready?: boolean; // that copy is made already
 };
 
 export type TlEdit = {

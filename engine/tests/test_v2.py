@@ -258,3 +258,46 @@ def test_wet_click_detector_leaves_a_plosive_before_a_vowel():
     v = int(burst + 0.015 * SR)                                     # ...and the vowel 15 ms later
     x[v:v + int(0.5 * SR)] += _speechlike(rng, SR, 0.5)
     assert not [a for a, _ in find_wet_clicks(x, SR, "strong") if abs(a / SR - 1.5) < 0.01]
+
+
+def test_analyze_again_keeps_hand_edits_and_waits_for_auto_edit(tmp_path, home):
+    from holos import preview
+    path = projects.new_episode("Analyze", _files(tmp_path, 1))["path"]
+    p = Project.load(path)
+    pause = next(e for e in p.edits if e.type == "pause" and e.status == "accepted")
+    editing.set_status(p, path, [pause.id], "rejected")              # the user restores one pause
+    ops.analyze_again(path)
+    p = Project.load(path)
+    kept = next(e for e in p.edits if e.id == pause.id)
+    assert kept.status == "rejected" and kept.touched
+    assert not [e for e in p.edits if e.type == "pause" and e.id != pause.id and e.start < kept.end and e.end > kept.start]
+    assert any(e.status == "suggested" for e in p.edits if e.type == "pause")      # found, not applied yet
+    assert editing.history_state(path)["undo_label"] == "Analyze"
+    res = ops.auto_edit(path)
+    p = Project.load(path)
+    assert not any(e.status == "suggested" for e in p.edits if e.type in ("pause", "gain"))
+    assert next(e for e in p.edits if e.id == pause.id).status == "rejected"
+    assert all(preview.is_ready(path, p, s.id) for s in p.sources) and res["previews"] >= 0
+    assert editing.history_state(path)["undo_label"] == "Auto-edit"
+
+
+def test_result_copy_has_the_recording_timing_and_follows_edits(tmp_path, home):
+    from holos import preview
+    path = projects.new_episode("Preview", _files(tmp_path, 1))["path"]
+    p = Project.load(path)
+    sid = p.sources[0].id
+    f = preview.ensure(p, path, sid)
+    y, sr = sf.read(f)
+    assert abs(len(y) / sr - p.source(sid).duration) < 0.01 and np.abs(y).max() < 1.0
+    key = preview.preview_key(p, sid)
+    pause = next(e for e in p.edits if e.type == "pause")
+    editing.set_status(p, path, [pause.id], "rejected" if pause.status == "accepted" else "accepted")
+    assert preview.preview_key(Project.load(path), sid) == key          # a cut does not change the sound
+    p = Project.load(path)
+    editing.set_automation(p, path, {"breaths": "off", "clicks": "off"})
+    p = Project.load(path)
+    assert preview.preview_key(p, sid) != key and not preview.is_ready(path, p, sid)
+    f2 = preview.ensure(p, path, sid)
+    assert f2.is_file() and not f.exists()                              # the old copy is cleaned up
+    tl = TestClient(create_app(token=None)).get("/api/projects/timeline", params={"path": path}).json()
+    assert tl["sources"][0]["preview"] == preview.preview_key(p, sid) and tl["sources"][0]["preview_ready"]

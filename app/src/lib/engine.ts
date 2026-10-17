@@ -229,6 +229,10 @@ export const engine = {
   create: (req: CreateRequest) => call<{ path: string; summary: Summary; skipped: FileInfo[] }>("POST", "/api/projects", req),
   summary: (path: string) => call<Summary>("GET", `/api/projects/summary?path=${encodeURIComponent(path)}`),
   process: (path: string) => call<Job>("POST", "/api/projects/process", { path }),
+  /** Editor "Analyze": find everything again with the current detectors (hand edits stay, nothing applied yet). */
+  analyze: (path: string) => call<Job>("POST", "/api/projects/analyze", { path }),
+  /** Editor "Auto-edit": apply the Automation settings and prepare the processed sound for "Result". */
+  autoEdit: (path: string) => call<Job>("POST", "/api/projects/autoedit", { path }),
   projects: () => call<{ root: string; projects: ProjectRow[] }>("GET", "/api/projects/list"),
   newEpisode: (req: { name: string; files: string[]; automation?: Partial<Automation>; language?: string; glossary?: string[] }) =>
     call<Job>("POST", "/api/episodes", req),
@@ -256,6 +260,11 @@ export const engine = {
   /** URL for <audio>/<img> (they can't send headers, so the token goes in the query). */
   assetUrl(kind: "audio" | "spectrogram", path: string, source: string): string {
     return `${ENGINE_URL}/api/projects/${kind}?path=${encodeURIComponent(path)}&source=${encodeURIComponent(source)}&token=${encodeURIComponent(token())}`;
+  },
+  /** A recording for the player; with `preview` (the version key from the timeline) its processed "Result" copy. */
+  audioUrl(path: string, source: string, preview?: string): string {
+    const base = this.assetUrl("audio", path, source);
+    return preview ? `${base}&processed=1&v=${encodeURIComponent(preview)}` : base;
   },
   async peaks(path: string, source: string): Promise<{ rate: number; data: Int8Array }> {
     const res = await fetch(`${ENGINE_URL}/api/projects/peaks?path=${encodeURIComponent(path)}&source=${encodeURIComponent(source)}`, {

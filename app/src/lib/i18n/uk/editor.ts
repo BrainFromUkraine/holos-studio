@@ -59,6 +59,28 @@ export const editor: Record<string, string | string[]> = {
   Blade: "Лезо",
   Range: "Діапазон",
   "Snap to silence": "Прилипання до тиші",
+  // ---- Analyze / Auto-edit, what to play ----
+  "Automatic editing": "Автоматичний монтаж",
+  Analyze: "Аналіз",
+  "Auto-edit": "Автомонтаж",
+  "Find breaths, pauses, mouth clicks, repeats and fillers again. Your hand edits stay; nothing is applied until Auto-edit.":
+    "Знайти заново вдихи, паузи, клацання, повтори й слова-паразити. Ваші ручні правки лишаються; нічого не застосовується до Автомонтажу.",
+  "Apply the Automation settings to everything found and prepare the processed sound. Your hand edits stay.":
+    "Застосувати налаштування Автоматики до всього знайденого й підготувати оброблений звук. Ваші ручні правки лишаються.",
+  Analyzing: "Аналіз",
+  "Auto-editing": "Автомонтаж",
+  "Recognizing speech": "Розпізнавання мови",
+  "Finding repeats": "Пошук повторів",
+  "Preparing the view": "Підготовка вигляду",
+  "Preparing the sound": "Підготовка звуку",
+  "Something went wrong.": "Щось пішло не так.",
+  "What to play": "Що грати",
+  Original: "Оригінал",
+  Result: "Результат",
+  "Play the recordings as they are: no edits, no processing": "Грати записи як є: без монтажу й обробки",
+  "Play the edited and processed sound, as it will be exported": "Грати змонтований і оброблений звук — так, як буде в експорті",
+  "Play the edited and processed sound, as it will be exported (being prepared — the first play may take a few seconds)":
+    "Грати змонтований і оброблений звук — так, як буде в експорті (готується — перше відтворення може зайняти кілька секунд)",
   "Moves cut edges to the quietest point nearby": "Межі різу самі зсуваються в найтихіше місце поруч",
   History: "Історія",
   Undo: "Скасувати",

@@ -1,5 +1,6 @@
 # Windows smoke test of a built installer: silent per-user install → first run (uv setup) → engine answers
-# → graceful close stops the engine → relaunch → hard kill of the app stops the engine (Job Object).
+# → graceful close stops the engine → relaunch → hard kill of the app stops the engine (Job Object)
+# → engine update while `holos.exe mcp` (Claude Desktop) is running: the busy file is moved aside, setup succeeds.
 #
 #   pwsh scripts/smoke-test.ps1 -Installer "app/src-tauri/target/release/bundle/nsis/Holos Studio_0.2.0_x64-setup.exe"
 #
@@ -76,6 +77,30 @@ try {
     Stop-Process -Id $app.Id -Force
     Wait-NoEngine "killing the app"
     Note "app killed: engine stopped with it"
+
+    # Engine update while Claude Desktop holds holos.exe: run `holos.exe mcp` the way Claude Desktop does (stdin kept
+    # open), make the next start reinstall the engine package, and check that setup moves the busy file aside.
+    $holos = Join-Path $Data "env\Scripts\holos.exe"
+    $psi = New-Object Diagnostics.ProcessStartInfo $holos, "mcp"
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardInput = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.CreateNoWindow = $true
+    $mcp = [Diagnostics.Process]::Start($psi)
+    Start-Sleep -Seconds 5
+    if ($mcp.HasExited) { throw "holos.exe mcp exited (code $($mcp.ExitCode))" }
+    Remove-Item (Join-Path $Data "engine-setup.json") -Force
+    Get-ChildItem (Join-Path $Data "env\Lib\site-packages") -Directory -Filter "holos_engine-*.dist-info" | Remove-Item -Recurse -Force
+    $sw.Restart()
+    $app = Start-Process -FilePath $exe.FullName -PassThru
+    $null = Wait-Engine $app 10
+    $moved = Get-ChildItem (Join-Path $Data "env") -Recurse -File -Filter "*.holos-old" -ErrorAction SilentlyContinue
+    if (-not $moved) { throw "setup succeeded but nothing was moved aside — the busy-file path was not exercised" }
+    if ($mcp.HasExited) { throw "the running holos.exe mcp was stopped by the update" }
+    Note "update while Claude Desktop runs holos.exe: setup moved $($moved.Name -join ', ') aside, engine ready in $([int]$sw.Elapsed.TotalSeconds) s, MCP process kept running"
+    $mcp.Kill()
+    Stop-Process -Id $app.Id -Force
+    Wait-NoEngine "the update test"
 }
 catch {
     $log = Join-Path $Data "engine.log"

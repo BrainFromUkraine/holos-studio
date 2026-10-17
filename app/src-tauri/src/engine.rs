@@ -38,6 +38,10 @@ pub const DEV_URL: &str = "http://127.0.0.1:8765";
 const EXTRAS: &[&str] = &["asr", "gpu", "video"];
 /// Lines kept for the UI (setup log / engine stderr).
 const LOG_LINES: usize = 200;
+/// `uv sync` runs again after moving a file another program holds open (see `move_aside`), at most this often.
+const SYNC_ATTEMPTS: usize = 8;
+/// Suffix of files moved aside during setup; the next setup deletes them.
+const MOVED_SUFFIX: &str = ".holos-old";
 /// The first start after setup imports numpy/scipy/ctranslate2 from a cold disk — be patient.
 const START_TIMEOUT: Duration = Duration::from_secs(180);
 
@@ -88,6 +92,8 @@ struct Inner {
     shutting_down: bool,
     /// `<data>/engine.log`: the same lines as `log`, kept on disk for support (rewritten on every start).
     log_file: Option<fs::File>,
+    /// Output of the current `uv sync` run, to find a file it could not replace.
+    sync_lines: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -147,6 +153,7 @@ impl EngineManager {
                 generation: 0,
                 shutting_down: false,
                 log_file: None,
+                sync_lines: Vec::new(),
             })),
             job: Arc::new(if dev { None } else { KillOnClose::new() }),
         }
@@ -246,28 +253,53 @@ impl EngineManager {
         let _ = fs::remove_file(p.marker());
         copy_dir(&p.bundled_src, &p.src()).map_err(|e| format!("Could not copy the engine code ({e})"))?;
 
-        let mut cmd = Command::new(&p.uv);
-        cmd.args(["sync", "--frozen", "--no-dev", "--compile-bytecode", "--color", "never"]);
-        for extra in EXTRAS {
-            cmd.args(["--extra", extra]);
-        }
-        cmd.current_dir(p.src())
-            .env("UV_PROJECT_ENVIRONMENT", plain(&p.env()))
-            .env("UV_PYTHON_INSTALL_DIR", plain(&p.data.join("python")))
-            .env("UV_CACHE_DIR", plain(&p.data.join("uv-cache")))
-            // Always our own Python in <data>: a system Python the user may later remove must not be used.
-            .env("UV_PYTHON_PREFERENCE", "only-managed")
-            // Ignore any uv.toml the user may have; the big CUDA wheels need a lenient timeout.
-            .env("UV_NO_CONFIG", "1")
-            .env("UV_HTTP_TIMEOUT", "300")
-            .env_remove("VIRTUAL_ENV");
+        remove_moved(&p.env());
 
-        let status = self.run_to_end(app, generation, cmd, true)?;
-        if !status.success() {
-            return Err(format!(
-                "Could not prepare the engine. Check the internet connection and free disk space. (uv sync exit code {}; about 5 GB is needed)",
-                status.code().map(|c| c.to_string()).unwrap_or_else(|| "?".into())
-            ));
+        // Claude Desktop keeps `holos.exe mcp` from this environment running, so uv may find a file it has to
+        // replace in use ("os error 32"). Windows will not delete a running program but does let it be renamed:
+        // move it aside and run uv again. The running program is not disturbed; the next setup deletes the old file.
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            self.lock().sync_lines.clear();
+            let status = self.run_to_end(app, generation, sync_command(p), true)?;
+            if status.success() {
+                break;
+            }
+            let locked = {
+                let g = self.lock();
+                g.sync_lines.iter().rev().find_map(|l| locked_path(l))
+            };
+            match locked {
+                Some(file) if attempt < SYNC_ATTEMPTS && file.starts_with(normalize(Path::new(&plain(&p.env())))) => {
+                    match move_aside(&file) {
+                        Ok(_) => self.line(
+                            app,
+                            generation,
+                            format!("In use by another program (Claude Desktop?), moved aside: {}", show(&file)),
+                            true,
+                        ),
+                        Err(e) => return Err(format!(
+                            "A file of the engine is in use by another program and could not be replaced. Quit Claude Desktop \
+                             (including its tray icon) and press Try again. ({}: {e})",
+                            show(&file)
+                        )),
+                    }
+                }
+                Some(file) => {
+                    return Err(format!(
+                        "A file of the engine is in use by another program. Quit Claude Desktop (including its tray icon) \
+                         and press Try again. ({})",
+                        show(&file)
+                    ))
+                }
+                None => {
+                    return Err(format!(
+                        "Could not prepare the engine. Check the internet connection and free disk space. (uv sync exit code {}; about 5 GB is needed)",
+                        code(status)
+                    ))
+                }
+            }
         }
         if !p.holos().is_file() {
             return Err(format!("Setup finished but the engine was not created. ({})", show(&p.holos())));
@@ -433,6 +465,9 @@ impl EngineManager {
                 g.log.pop_front();
             }
             g.log.push_back(line.clone());
+            if setup {
+                g.sync_lines.push(line.clone());
+            }
             if let Some(f) = g.log_file.as_mut() {
                 let _ = writeln!(f, "{line}");
             }
@@ -494,6 +529,83 @@ pub fn mcp_config(app: AppHandle, engine: State<'_, EngineManager>) -> Result<St
 }
 
 // ---- helpers ----------------------------------------------------------------------------------------------------
+
+/// `uv sync` of the bundled engine into `<data>/env`.
+fn sync_command(p: &Paths) -> Command {
+    let mut cmd = Command::new(&p.uv);
+    cmd.args(["sync", "--frozen", "--no-dev", "--compile-bytecode", "--color", "never"]);
+    for extra in EXTRAS {
+        cmd.args(["--extra", extra]);
+    }
+    cmd.current_dir(p.src())
+        .env("UV_PROJECT_ENVIRONMENT", plain(&p.env()))
+        .env("UV_PYTHON_INSTALL_DIR", plain(&p.data.join("python")))
+        .env("UV_CACHE_DIR", plain(&p.data.join("uv-cache")))
+        // Always our own Python in <data>: a system Python the user may later remove must not be used.
+        .env("UV_PYTHON_PREFERENCE", "only-managed")
+        // Ignore any uv.toml the user may have; the big CUDA wheels need a lenient timeout.
+        .env("UV_NO_CONFIG", "1")
+        .env("UV_HTTP_TIMEOUT", "300")
+        .env_remove("VIRTUAL_ENV");
+    cmd
+}
+
+/// The file uv could not replace because another program has it open, from a line of uv's output such as
+/// ``error: failed to remove file `C:\…\site-packages\../../Scripts/holos.exe`: The process cannot access the
+/// file because it is being used by another process. (os error 32)``.
+fn locked_path(line: &str) -> Option<PathBuf> {
+    if !(line.contains("os error 32") || line.contains("being used by another process")) {
+        return None;
+    }
+    let a = line.find('`')?;
+    let rest = &line[a + 1..];
+    let b = rest.find('`')?;
+    Some(normalize(Path::new(&rest[..b])))
+}
+
+/// Resolve `.` and `..` without touching the disk (uv prints paths like `site-packages\../../Scripts/holos.exe`).
+fn normalize(p: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for c in p.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// Rename `file` to `<name>.<n>.holos-old` next to it, so uv can write a new one.
+fn move_aside(file: &Path) -> std::io::Result<PathBuf> {
+    let name = file.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    for n in 0..1000 {
+        let dst = file.with_file_name(format!("{name}.{n}{MOVED_SUFFIX}"));
+        if !dst.exists() {
+            fs::rename(file, &dst)?;
+            return Ok(dst);
+        }
+    }
+    Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "too many old copies"))
+}
+
+/// Delete files moved aside by earlier setups (those still in use stay until next time).
+fn remove_moved(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        match entry.file_type() {
+            Ok(t) if t.is_dir() => remove_moved(&path),
+            Ok(_) if path.to_string_lossy().ends_with(MOVED_SUFFIX) => {
+                let _ = fs::remove_file(&path);
+            }
+            _ => {}
+        }
+    }
+}
 
 fn exe(name: &str) -> String {
     if cfg!(windows) {
@@ -649,6 +761,34 @@ mod tests {
         assert_eq!(hash_dir(&copy).unwrap(), b);
         let _ = fs::remove_dir_all(&dir);
         let _ = fs::remove_dir_all(&copy);
+    }
+
+    #[test]
+    fn locked_file_is_found_in_uv_output() {
+        let line = "error: failed to remove file `/d/env/Lib/site-packages/../../Scripts/holos.exe`: The process cannot \
+                    access the file because it is being used by another process. (os error 32)";
+        assert_eq!(locked_path(line), Some(PathBuf::from("/d/env/Scripts/holos.exe")));
+        assert_eq!(locked_path("error: failed to fetch `https://x` (os error 10060)"), None);
+        assert_eq!(locked_path("Prepared 1 package in 877ms"), None);
+    }
+
+    #[test]
+    fn moved_aside_files_are_cleaned_up() {
+        let dir = std::env::temp_dir().join(format!("holos-moved-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("Scripts")).unwrap();
+        let exe = dir.join("Scripts").join("holos.exe");
+        fs::write(&exe, "old").unwrap();
+        let a = move_aside(&exe).unwrap();
+        fs::write(&exe, "new").unwrap();
+        let b = move_aside(&exe).unwrap();
+        assert_ne!(a, b);
+        assert!(!exe.exists() && a.exists() && b.exists());
+        fs::write(&exe, "newest").unwrap();
+        remove_moved(&dir);
+        assert!(!a.exists() && !b.exists());
+        assert_eq!(fs::read_to_string(&exe).unwrap(), "newest");
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

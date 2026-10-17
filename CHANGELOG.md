@@ -6,6 +6,32 @@ All notable changes to Holos Studio. Versions follow [Semantic Versioning](https
 Every release has an English and a Ukrainian part. The release page on GitHub shows both; the update banner in the
 app shows the part in the interface language. Sections: **New**, **Improved**, **Fixed**, **Removed**, **Known limitations**.
 
+## [0.2.0-beta.4] — 2026-10-17
+
+Breaths are found between phrases and really removed.
+
+### English
+
+#### Improved
+
+- **Breaths are found much better.** Quick breaths between phrases (70–150 ms) were missed because the voice detector counted them as speech. Breaths are now told from the voice by the sound itself: quiet, well below the speech, and not tonal like a voice. Projects you already have are re-checked automatically the first time you open them; breath edits you changed by hand are kept.
+- **"Remove" really removes breaths.** It used to lower them by 30 dB; now each breath is replaced with the room tone around it. The pause stays, so the rhythm of speech does not change. "Reduce" works as before.
+
+#### Known limitations
+
+- A voiced, gasping inhale that runs straight into a word is left as it is.
+
+### Українською
+
+#### Покращено
+
+- **Вдихи знаходяться значно краще.** Швидкі вдихи між фразами (70–150 мс) пропускались, бо детектор голосу вважав їх мовою. Тепер вдих відрізняється від голосу за самим звуком: тихий, значно нижче мови і без тону, як у голосу. Наявні проєкти перевіряються заново автоматично під час першого відкриття; вдихи, які ви змінили вручну, лишаються.
+- **«Прибрати» справді прибирає вдихи.** Раніше вони лише приглушувались на 30 dB; тепер кожен вдих замінюється фоном кімнати навколо нього. Пауза лишається, тож ритм мови не змінюється. «Приглушити» працює, як і раніше.
+
+#### Відомі обмеження
+
+- Дзвінкий, «схлипуючий» вдих, що переходить просто в слово, лишається як є.
+
 ## [0.2.0-beta.3] — 2026-10-17
 
 Wet mouth clicks are removed properly.

@@ -6,6 +6,26 @@ All notable changes to Holos Studio. Versions follow [Semantic Versioning](https
 Every release has an English and a Ukrainian part. The release page on GitHub shows both; the update banner in the
 app shows the part in the interface language. Sections: **New**, **Improved**, **Fixed**, **Removed**, **Known limitations**.
 
+## [0.2.0-beta.6] — 2026-10-17
+
+Analyze and Auto-edit in the editor; the editor plays the finished sound.
+
+### English
+
+#### New
+
+- **Analyze** (in the editor, next to "Done automatically"). Finds breaths, pauses, drop-outs, mouth clicks, repeats, retakes and fillers again with the current detectors — useful for a project made with an older version. Your hand edits stay; the new finds are not applied until Auto-edit. Ctrl+Z undoes it.
+- **Auto-edit.** Applies the Automation settings to everything found and prepares the processed sound. Your hand edits stay. Ctrl+Z undoes it.
+- **The editor plays the result.** "Result" plays every recording processed the way it will be exported — breaths, mouth clicks, voice processing, loudness — with the cuts and pauses applied on the fly, so a manual cut or restore is heard at once. "Original" plays the recordings as they are. After a change that alters the sound (a restored breath, an Automation setting), only the affected recording is prepared again, in the background; "Result …" means it is still being prepared.
+
+### Українською
+
+#### Нове
+
+- **Аналіз** (у редакторі, поруч із «Зроблено автоматично»). Заново знаходить вдихи, паузи, провали фону, клацання, повтори, дублі й слова-паразити поточними детекторами — корисно для проєкту, зробленого старішою версією. Ваші ручні правки лишаються; нові знахідки не застосовуються до Автомонтажу. Ctrl+Z скасовує.
+- **Автомонтаж.** Застосовує налаштування Автоматики до всього знайденого й готує оброблений звук. Ваші ручні правки лишаються. Ctrl+Z скасовує.
+- **Редактор грає результат.** «Результат» грає кожен запис, оброблений так, як буде в експорті — вдихи, клацання, обробка голосу, гучність, — а вирізки й паузи накладаються на льоту, тож ручну вирізку чи відновлення чути одразу. «Оригінал» грає записи як є. Після зміни, що впливає на звук (відновлений вдих, налаштування Автоматики), у фоні заново готується лише потрібний запис; «Результат …» означає, що він ще готується.
+
 ## [0.2.0-beta.5] — 2026-10-17
 
 Updates work while Claude Desktop is connected.

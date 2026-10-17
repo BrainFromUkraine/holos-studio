@@ -72,6 +72,7 @@ class _EditBase(BaseModel):
 class GainEdit(_EditBase):
     type: Literal["gain"] = "gain"
     db: float
+    room: bool = False              # replace with the recording's room tone instead of lowering (breaths "Remove")
 
 
 class CutEdit(_EditBase):
@@ -118,7 +119,7 @@ class Automation(BaseModel):
     pause_max: float = 0.9          # pauses longer than this…
     pause_target: float = 0.7       # …are shortened to this (middle removed)
     breaths: Literal["duck", "cut", "off"] = "duck"
-    breath_db: float = -12.0        # "duck" level; "cut" mutes down to room tone
+    breath_db: float = -12.0        # "duck" level; "cut" replaces the breath with room tone
     clicks: Literal["off", "light", "normal", "strong"] = "normal"   # mouth clicks / saliva
     kinds: dict[str, CutPolicy] = Field(default_factory=lambda: {
         "repeat": "cut", "retake": "cut", "filler": "cut",
@@ -141,6 +142,7 @@ class AnalysisSettings(BaseModel):
     breath_db: float = -12.0
     pause_max: float = 0.9
     pause_target: float = 0.7
+    breath_version: int = 1         # breath detector the edits were made with (analysis.BREATH_VERSION)
 
 
 class TimelineSettings(BaseModel):

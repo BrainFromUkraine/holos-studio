@@ -88,6 +88,26 @@ def frame_features(x: np.ndarray, sr: int, with_vad: bool = True, chunk_frames: 
     return Frames(rms, flat, hi, lo, speech)
 
 
+def voicing(x: np.ndarray, sr: int, chunk_frames: int = 5000) -> np.ndarray:
+    """Periodicity per HOP frame: the highest normalized autocorrelation at pitch lags (70-400 Hz) of the
+    signal below 1 kHz. Voice is periodic (about 0.6-1), a breath is noise (about 0.2-0.4)."""
+    from scipy.signal import butter, sosfiltfilt
+    y = sosfiltfilt(butter(4, 1000, btype="lowpass", fs=sr, output="sos"), x)
+    hop, win = int(sr * HOP), int(sr * 0.04)
+    n = max(0, (len(y) - win) // hop)
+    lo, hi = int(sr / 400), int(sr / 70)
+    nfft = 1 << int(np.ceil(np.log2(2 * win)))
+    w = np.hanning(win)
+    out = np.zeros(n)
+    for a in range(0, n, chunk_frames):
+        b = min(n, a + chunk_frames)
+        fr = y[np.arange(win)[None, :] + hop * np.arange(a, b)[:, None]]
+        fr = (fr - fr.mean(1, keepdims=True)) * w
+        ac = np.fft.irfft(np.abs(np.fft.rfft(fr, nfft, axis=1)) ** 2, axis=1)[:, :hi + 1]
+        out[a:b] = ac[:, lo:hi + 1].max(1) / (ac[:, 0] + 1e-12)
+    return out
+
+
 def runs(mask: np.ndarray) -> list[tuple[int, int]]:
     """Contiguous True runs as (start, end) index pairs, end exclusive."""
     m = np.concatenate([[False], np.asarray(mask, bool), [False]])

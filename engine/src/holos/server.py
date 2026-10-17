@@ -182,7 +182,9 @@ def create_app(token: str | None = None) -> FastAPI:
         if not Path(path).is_file():
             raise HTTPException(404, f"project not found: {path}")
         templates_mod.touch_recent(path)
-        return Project.load(path)
+        p = Project.load(path)
+        ops.refresh_breaths(p, path)           # projects analysed by an older breath detector
+        return p
 
     def run_job(kind: str, project: str, fn: Callable[[Callable], Any]) -> Job:
         job = Job(id=uuid.uuid4().hex[:12], kind=kind, project=project)

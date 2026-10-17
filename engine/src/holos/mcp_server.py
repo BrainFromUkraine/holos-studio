@@ -59,7 +59,10 @@ def _load(path: str) -> Project:
     _seen()
     if not Path(path).is_file():
         raise ValueError(f"project not found: {path} — call list_projects")
-    return Project.load(path)
+    from . import ops
+    p = Project.load(path)
+    ops.refresh_breaths(p, path)               # projects analysed by an older breath detector
+    return p
 
 
 def parse_time(v: str | float | int) -> float:

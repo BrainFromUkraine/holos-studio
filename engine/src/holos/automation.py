@@ -9,7 +9,7 @@ from __future__ import annotations
 from .project import Automation, ChainStep, CutEdit, GainEdit, PauseEdit, Project
 
 MIN_PAUSE = 0.35          # analysis records pauses from this length; automation picks the long ones
-BREATH_CUT_DB = -30.0     # "cut" breaths: down to about room-tone level (true removal would break the rhythm)
+BREATH_CUT_DB = -30.0     # level used if a recording has no room tone to replace a breath with
 
 
 def _chain_step(p: Project, module: str) -> ChainStep | None:
@@ -49,6 +49,7 @@ def apply(p: Project) -> dict:
             on = a.pauses and (e.end - e.start) >= a.pause_max and (e.end - e.start) > a.pause_target
         elif isinstance(e, GainEdit):
             e.db = BREATH_CUT_DB if a.breaths == "cut" else a.breath_db
+            e.room = a.breaths == "cut"           # "Remove": the room tone takes its place, the timing stays
             on = a.breaths != "off"
         elif isinstance(e, CutEdit):
             if e.kind == "manual":

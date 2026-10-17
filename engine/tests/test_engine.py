@@ -263,3 +263,60 @@ def test_join_takes_missing_silence_from_the_next_recording(tmp_path):
     assert tail1 == pytest.approx(0.1, abs=1e-6) and lead2 > 0.3
     gap, _ = _speech_gap(build_program(p).audio, p.timeline_settings.lead_in + 0.5)
     assert gap == pytest.approx(0.4, abs=0.02)
+
+
+def _voiced(sec, f0=140, amp=0.1):
+    t = np.arange(int(sec * SR)) / SR
+    return amp * np.sign(np.sin(2 * np.pi * f0 * t)) * (0.5 + 0.5 * np.sin(2 * np.pi * 3 * t) ** 2)
+
+
+def _breath(sec, amp=0.004):
+    from scipy.signal import butter, sosfiltfilt
+    b = sosfiltfilt(butter(2, [400, 5000], btype="bandpass", fs=SR, output="sos"), rng.standard_normal(int(sec * SR)))
+    return amp * b / np.abs(b).max() * np.hanning(len(b)) ** 0.5
+
+
+def test_quick_breath_between_phrases_is_found_without_vad():
+    from holos.analysis import detect_breaths
+    from holos.analysis.features import frame_features, voicing
+    from holos.project import AnalysisSettings
+    room = noise(3.0, -72)
+    x = room.copy()
+    x[int(0.3 * SR):int(1.3 * SR)] += _voiced(1.0)
+    x[int(1.33 * SR):int(1.43 * SR)] += _breath(0.10)                # 100 ms breath, 30 ms after the phrase
+    x[int(1.46 * SR):int(2.5 * SR)] += _voiced(1.04)
+    F = frame_features(x, SR, with_vad=False)
+    sp = float(np.median(F.rms_db[F.rms_db > -30]))
+    edits = detect_breaths(F.rms_db, voicing(x, SR), "s1", 0.3, 2.5, sp, -72.0, AnalysisSettings())
+    hit = [e for e in edits if e.start < 1.43 and e.end > 1.33]
+    assert hit and all(e.start > 1.29 and e.end < 1.47 for e in hit)    # the breath, not the words around it
+    assert not [e for e in edits if 0.4 < e.start < 1.25 or 1.5 < e.start < 2.4]
+
+
+def test_removed_breath_is_replaced_with_room_tone(tmp_path):
+    from holos.edit import build_program, timeline_map, map_time
+    p = _two_file_project(tmp_path)
+    x, _ = sf.read(tmp_path / "s1.wav")
+    x[int(3.15 * SR):int(3.45 * SR)] += _breath(0.30, amp=0.01)
+    sf.write(tmp_path / "s1.wav", x, SR)
+    p.edits.append(GainEdit(id="s1-b1", source="s1", start=3.12, end=3.48, db=-12, status="accepted", room=True))
+    y = build_program(p).audio
+    start, a0, b0, rem = timeline_map(p)["s1"]
+    t = start + map_time(3.2, a0, rem, p.timeline_settings.crossfade)
+    seg = y[int(t * SR):int((t + 0.2) * SR)]
+    lv = 10 * np.log10(np.mean(seg ** 2))
+    assert lv < -60                                                   # the breath was ~-45 dB, the room -70
+
+
+def test_refresh_breaths_keeps_hand_edits(tmp_path):
+    from holos import ops
+    from holos.analysis import BREATH_VERSION
+    p = _two_file_project(tmp_path)
+    p.analysis_settings.breath_version = 1
+    p.edits.append(GainEdit(id="s1-b1", source="s1", start=0.2, end=0.5, db=-6, status="rejected", touched=True))
+    p.edits.append(GainEdit(id="s1-b2", source="s1", start=3.5, end=3.9, db=-12, status="accepted"))
+    ops.refresh_breaths(p)
+    assert p.analysis_settings.breath_version == BREATH_VERSION
+    assert any(e.id == "s1-b1" and e.touched and e.status == "rejected" for e in p.edits)
+    assert len({e.id for e in p.edits}) == len(p.edits)
+    assert ops.refresh_breaths(p) == 0                                # done once

@@ -9,9 +9,48 @@ import numpy as np
 import pyloudnorm as pyln
 
 from ..project import AnalysisSettings, FillEdit, GainEdit, PauseEdit, SourceAnalysis
-from .features import HOP, Frames, frame_features, runs
+from .features import HOP, WIN, Frames, frame_features, runs, voicing
 
-__all__ = ["analyze_source"]
+__all__ = ["analyze_source", "detect_breaths", "BREATH_VERSION"]
+
+BREATH_VERSION = 2          # 2: quiet, non-periodic stretches (no VAD) - finds quick breaths between phrases
+BREATH_BELOW_SPEECH = 22.0  # a breath is at least this far below the speech level (dB)
+BREATH_MAX_VOICING = 0.45   # ...and not periodic (voice is)
+
+
+def detect_breaths(rms: np.ndarray, voiced: np.ndarray, sid: str, on: float, off: float, sp_med: float,
+                   room: float, settings: AnalysisSettings) -> list[GainEdit]:
+    """Breaths: stretches of 60 ms - 1.5 s that are far below the speech level, above the room, and not periodic.
+
+    Learned from marked examples: quick breaths between phrases are often inside what the voice detector calls
+    speech, so it is not used here; periodicity tells voice from breath noise instead. Holes up to 30 ms are
+    bridged only when they are just as quiet (holes up to 50 ms), and frames rising towards a word are
+    trimmed off the edges, so a span never reaches into a word.
+    """
+    n = min(len(rms), len(voiced))
+    rms, voiced = rms[:n], voiced[:n]
+    top = sp_med - BREATH_BELOW_SPEECH
+    # very quiet frames need no periodicity check: nothing 30 dB under the speech is a word worth keeping
+    cand = (rms > room + 5) & (rms < top) & ((voiced < BREATH_MAX_VOICING) | (rms < sp_med - 30))
+    c = cand.copy()
+    for a, b in runs(~cand):
+        if b - a <= 5 and a > 0 and b < n and (rms[a:b] < top).all():     # quiet but briefly periodic
+            c[a:b] = True
+    edits: list[GainEdit] = []
+    for a, b in runs(c):
+        while b - a > 2 and rms[b - 1] > top - 8:     # edge frames rising towards a word: leave them alone
+            b -= 1
+        while b - a > 2 and rms[a] > top - 8:
+            a += 1
+        s, e = a * HOP + WIN / 2 - HOP / 2, b * HOP + WIN / 2 - HOP / 2     # frame centres
+        if not (0.06 <= e - s <= 1.5) or s < on - 0.6 or e > off + 0.6:
+            continue
+        peak = float(rms[a:b].max())
+        if peak < room + 10:                          # just room noise
+            continue
+        edits.append(GainEdit(id=f"{sid}-b{len(edits) + 1}", source=sid, start=round(s, 3), end=round(e, 3),
+                              db=settings.breath_db, reason=f"breath (peak {peak:.1f} dBFS)"))
+    return edits
 
 
 def analyze_source(x: np.ndarray, sr: int, sid: str, settings: AnalysisSettings,
@@ -36,27 +75,9 @@ def analyze_source(x: np.ndarray, sr: int, sid: str, settings: AnalysisSettings,
         b0 += 1
     on, off = a0 * HOP, b0 * HOP
 
-    # --- breaths: non-speech, noise-like, well below speech ---------------
-    cand = (~speech) & (rms > room + 8) & (rms < min(sp_med - 20, -44)) \
-        & ((F.hi > 0.25) | (F.flat > 0.08)) & (F.lo < 0.6)
-    c = cand.copy()
-    for a, b in runs(~cand):                            # close holes <= 40 ms
-        if b - a <= 4 and a > 0 and b < N:
-            c[a:b] = True
-    edits: list = []
-    breath_spans = []
-    for a, b in runs(c):
-        if not (0.12 <= (b - a) * HOP <= 1.5) or a < a0 - 60 or b > b0 + 60:
-            continue
-        med = np.median(rms[a:b])
-        while b - a > 8 and rms[b - 1] > med + 8:       # don't eat word onset
-            b -= 1
-        while b - a > 8 and rms[a] > med + 8:           # or word tail
-            a += 1
-        s, e = a * HOP, b * HOP + 0.02
-        breath_spans.append((a, b))
-        edits.append(GainEdit(id=f"{sid}-b{len(breath_spans)}", source=sid, start=round(s, 3), end=round(e, 3),
-                              db=settings.breath_db, reason=f"breath (peak {rms[a:b].max():.1f} dBFS)"))
+    # --- breaths: quiet, non-periodic stretches ---------------------------
+    edits: list = detect_breaths(rms, voicing(x, sr), sid, on, off, sp_med, room, settings)
+    breath_spans = [(int(e.start / HOP), int(np.ceil(e.end / HOP))) for e in edits]
 
     # --- pauses: every one from MIN_PAUSE is recorded; automation decides which get shortened ----
     from ..automation import MIN_PAUSE

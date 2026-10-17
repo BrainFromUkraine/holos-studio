@@ -148,7 +148,7 @@ export default function AutomationPage() {
             <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, opacity: a.breaths === "duck" ? 1 : 0.5 }} className="muted">{t("By")}
               <input type="range" min={-30} max={-3} value={a.breath_db} disabled={a.breaths !== "duck"} onChange={(e) => change({ breath_db: Number(e.target.value) }, false)} style={{ flex: "1 1 auto" }} />
               <span className="mono" style={{ color: "var(--text)", width: 52, textAlign: "right" }}>{a.breath_db} dB</span></label>
-            <div className="muted" style={{ fontSize: 12 }}>{t("“Remove” brings them down to room tone, with no hole in the sound.")}</div>
+            <div className="muted" style={{ fontSize: 12 }}>{t("“Remove” replaces each breath with the room tone around it: the pause stays, with no hole in the sound.")}</div>
           </section>
 
           <section className="card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }} aria-labelledby="r-h">

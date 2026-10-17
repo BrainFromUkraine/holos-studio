@@ -142,7 +142,7 @@ def build_program(p: Project) -> Program:
         # gain edits (breaths etc.)
         env = np.ones(len(x))
         for e in edits:
-            if isinstance(e, GainEdit):
+            if isinstance(e, GainEdit) and not e.room:
                 a, b = int(e.start * sr), int(e.end * sr)
                 if b > a:
                     env[a:b] = np.minimum(env[a:b], _ramp_env(b - a, db2a(e.db), int(0.02 * sr)))
@@ -161,6 +161,17 @@ def build_program(p: Project) -> Program:
                         continue
                     L = b - a
                     x[a:b] += rt_local.take(L / sr + 0.01)[:L] * _fade_window(L, int(0.02 * sr))
+
+        # breaths to remove: crossfade to room tone (15 ms ramps), the timing stays
+        for e in edits:
+            if isinstance(e, GainEdit) and e.room:
+                a, b = int(e.start * sr), min(len(x), int(e.end * sr))
+                if b <= a:
+                    continue
+                L = b - a
+                w = _fade_window(L, int(0.015 * sr))
+                fill = rt_local.take(L / sr + 0.01)[:L] if rt_local else x[a:b] * db2a(e.db)
+                x[a:b] = x[a:b] * (1 - w) + fill * w
 
         a0, b0, removals = clip_plan(clip, A, edits, ts.crossfade, len(x) / sr, *pads[ci])
         pieces, cur = [], a0

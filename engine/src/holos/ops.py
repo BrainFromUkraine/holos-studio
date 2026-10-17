@@ -10,6 +10,7 @@ import json
 import re
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Callable, Iterable
@@ -98,6 +99,8 @@ def analyze_project(p: Project, path: str | Path, progress: Progress = _noop) ->
         progress("analyze", i, n, Path(s.path).name)
         x, sr = load_mono(s.path)
         A, edits = analyze_source(x, sr, s.id, p.analysis_settings)
+        from .analysis import BREATH_VERSION
+        p.analysis_settings.breath_version = BREATH_VERSION
         for e in edits:
             counts[e.type] += 1
         p.analysis[s.id] = A
@@ -106,6 +109,55 @@ def analyze_project(p: Project, path: str | Path, progress: Progress = _noop) ->
     p.save(path)
     progress("analyze", n, n, "done")
     return {"seconds": round(time.time() - t0, 1), **counts}
+
+
+_BREATH_LOCK = threading.Lock()
+
+
+def refresh_breaths(p: Project, path: str | Path | None = None) -> int:
+    """Re-detect breaths with the current detector in a project analysed by an older one. Breath edits the user
+    or Claude changed by hand are kept; the measurements (speech level, room) are reused. Returns the count."""
+    from .analysis import BREATH_VERSION, detect_breaths
+    if p.analysis_settings.breath_version >= BREATH_VERSION or not p.analysis:
+        return 0
+    with _BREATH_LOCK:
+        if path is not None:                     # another request may have just done it
+            q = Project.load(path)
+            if q.analysis_settings.breath_version >= BREATH_VERSION:
+                p.edits, p.analysis_settings = q.edits, q.analysis_settings
+                return 0
+        return _refresh_breaths(p, path, BREATH_VERSION, detect_breaths)
+
+
+def _refresh_breaths(p: Project, path, BREATH_VERSION, detect_breaths) -> int:
+    from .analysis.features import frame_features, voicing
+    from .io import load_mono
+    from .project import GainEdit
+    kept = [e for e in p.edits if not (isinstance(e, GainEdit) and not e.touched)]
+    ids = {e.id for e in kept}
+    added = 0
+    for s in p.sources:
+        A = p.analysis.get(s.id)
+        if A is None:
+            continue
+        x, sr = load_mono(s.path)
+        F = frame_features(x, sr, with_vad=False)
+        touched = [e for e in kept if isinstance(e, GainEdit) and e.source == s.id]
+        for k, e in enumerate(detect_breaths(F.rms_db, voicing(x, sr), s.id, A.speech_on, A.speech_off,
+                                             A.speech_level_db, A.room_db, p.analysis_settings)):
+            if any(t.start < e.end and t.end > e.start for t in touched):
+                continue
+            while e.id in ids:
+                e.id = f"{s.id}-b{k + 1}x{added}"
+            ids.add(e.id)
+            kept.append(e)
+            added += 1
+    p.edits = kept
+    p.analysis_settings.breath_version = BREATH_VERSION
+    automation.apply(p)
+    if path is not None:
+        p.save(path)
+    return added
 
 
 def asr_available() -> bool:
@@ -242,7 +294,8 @@ def safe_name(name: str) -> str:
 # Bump when the engine renders the same project differently, so cached renders are made again.
 # 2: recordings joined back to back (no room-tone gap between them).
 # 3: wet mouth clicks in quiet moments replaced with room sound.
-RENDER_VERSION = 3
+# 4: breaths "Remove" replaced with room tone.
+RENDER_VERSION = 4
 
 
 def fingerprint(p: Project) -> str:

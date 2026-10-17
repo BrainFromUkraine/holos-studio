@@ -40,7 +40,7 @@ export const automation: Record<string, string | string[]> = {
   "Reduce": "Приглушити",
   "Remove": "Прибрати",
   "By": "На",
-  "“Remove” brings them down to room tone, with no hole in the sound.": "«Прибрати» — до рівня тону кімнати, без діри в звуці.",
+  "“Remove” replaces each breath with the room tone around it: the pause stays, with no hole in the sound.": "«Прибрати» замінює кожен вдих фоном кімнати навколо нього: пауза лишається, без діри в звуці.",
 
   // repeats, retakes, fragments
   "Repeats, retakes, fragments": "Повтори, дублі, обірвані фрази",

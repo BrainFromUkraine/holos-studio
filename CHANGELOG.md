@@ -6,6 +6,22 @@ All notable changes to Holos Studio. Versions follow [Semantic Versioning](https
 Every release has an English and a Ukrainian part. The release page on GitHub shows both; the update banner in the
 app shows the part in the interface language. Sections: **New**, **Improved**, **Fixed**, **Removed**, **Known limitations**.
 
+## [0.2.0-beta.5] — 2026-10-17
+
+Updates work while Claude Desktop is connected.
+
+### English
+
+#### Fixed
+
+- **Engine updates no longer fail while Claude Desktop is open.** Claude Desktop keeps Holos's `holos.exe` running for the MCP connection, and Windows does not let an update replace (or even rename) that file, so preparing the new engine stopped with a misleading "check the internet connection" error. Claude Desktop now starts Holos as `python.exe -m holos mcp`, which an update never has to replace. Your existing Claude Desktop entry is moved to the new form automatically (only the Holos entry changes; a backup `claude_desktop_config.json.holos-backup` is kept). If an old connection still holds the file during this update, Holos stops it and carries on — restart Claude Desktop once afterwards.
+
+### Українською
+
+#### Виправлено
+
+- **Оновлення рушія більше не падає, коли відкритий Claude Desktop.** Claude Desktop тримає запущеним `holos.exe` для MCP-з'єднання, а Windows не дає оновленню замінити (і навіть перейменувати) цей файл, тому підготовка нового рушія зупинялась з оманливою помилкою «перевірте з'єднання з інтернетом». Тепер Claude Desktop запускає Holos як `python.exe -m holos mcp`, і цей файл оновленню замінювати не треба. Наявний запис у Claude Desktop переводиться на новий вигляд автоматично (змінюється лише запис Holos; резервна копія — `claude_desktop_config.json.holos-backup`). Якщо під час цього оновлення старе з'єднання ще тримає файл, Holos його зупиняє і продовжує — після цього один раз перезапустіть Claude Desktop.
+
 ## [0.2.0-beta.4] — 2026-10-17
 
 Breaths are found between phrases and really removed.

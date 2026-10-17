@@ -98,7 +98,7 @@ try {
         $sw.Restart()
         $a = Start-Process -FilePath $exe.FullName -PassThru
         $null = Wait-Engine $a 10
-        Note "$what — engine updated and ready in $([int]$sw.Elapsed.TotalSeconds) s"
+        Note "$what — engine updated and ready in $([int]$sw.Elapsed.TotalSeconds) s" | Out-Host   # not part of the result
         return $a
     }
     $holos = Join-Path $Data "env\Scripts\holos.exe"

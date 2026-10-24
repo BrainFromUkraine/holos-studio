@@ -383,8 +383,8 @@ def _run_ffmpeg(args: list[str]) -> None:
 def export_project(path: str | Path, out_dir: str | Path | None = None, name: str | None = None,
                    wav: bool | None = None, mp3: bool | None = None, chapters_txt: bool | None = None,
                    chapters_embed: bool | None = None, video: dict | None = None, preview: float = 0,
-                   progress: Progress = _noop) -> dict:
-    """Render and write the deliverables: WAV, MP3, YouTube timecodes, video via a template.
+                   progress: Progress = _noop, thumbnail: bool | None = None) -> dict:
+    """Render and write the deliverables: WAV, MP3, YouTube timecodes, video via a template, thumbnail.
 
     `video` = {"template": id, "params": {...}} or None. With `preview` > 0 only a short video is made.
     Settings given here are saved to the project as the new defaults.
@@ -401,6 +401,7 @@ def export_project(path: str | Path, out_dir: str | Path | None = None, name: st
     if video is not None:
         ex.video.template = video.get("template") or None
         ex.video.params = video.get("params") or {}
+    if thumbnail is not None: ex.make_thumbnail = thumbnail
     p.save(path)
 
     out = Path(out_dir) if out_dir else path.parent / "export"
@@ -417,6 +418,16 @@ def export_project(path: str | Path, out_dir: str | Path | None = None, name: st
                                   + (f" — install with: {tpl.manifest.install}" if tpl.manifest.install else ""))
     elif preview:
         raise ValueError("preview needs a video template")
+    thumb = None
+    if ex.make_thumbnail and not preview:
+        from . import thumbnail as TH
+        thumb = TH.initial(p, path)
+        if thumb.image:
+            thumb.image = TH.add_image(path, thumb.image)
+        if not thumb.image:
+            raise TH.ThumbnailError("add a picture for the thumbnail first")
+        if thumb.badge.enabled:
+            TH.badge_text(thumb)                                         # fail fast: no episode number
 
     master_wav, report = master(p, path, progress)
     rows = C.resolved(p)
@@ -446,6 +457,16 @@ def export_project(path: str | Path, out_dir: str | Path | None = None, name: st
             target = out / "timecodes.txt"
             target.write_text(C.youtube_text(rows), encoding="utf-8")
             files["timecodes"] = str(target)
+        if thumb is not None:
+            from . import thumbnail as TH
+            progress("thumbnail", 0, 1, f"thumbnail.{thumb.format}")
+            target, tw = TH.export(thumb, out)
+            files["thumbnail"] = str(target)
+            warnings = warnings + tw
+            if p.export.thumbnail is None or p.export.thumbnail.image != thumb.image:
+                p.export.thumbnail = thumb                               # the settings it was made with stay
+                p.save(path)
+            TH.remember(thumb, path)
 
     if tpl:
         suffix = "_preview" if preview else ""

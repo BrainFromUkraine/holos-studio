@@ -104,6 +104,12 @@ class ExportIn(BaseModel):
     chapters_embed: bool | None = None
     video: VideoIn | None = None
     preview: float = 0
+    thumbnail: bool | None = None
+
+
+class ThumbnailIn(BaseModel):
+    path: str
+    changes: dict[str, Any] = {}
 
 
 class EpisodeIn(BaseModel):
@@ -433,7 +439,48 @@ def create_app(token: str | None = None) -> FastAPI:
                 raise HTTPException(400, str(e).strip("'\""))
         return run_job("export", body.path, lambda progress: ops.export_project(
             body.path, body.out_dir, body.name, body.wav, body.mp3, body.chapters_txt, body.chapters_embed,
-            video, body.preview, progress)).snapshot()
+            video, body.preview, progress, thumbnail=body.thumbnail)).snapshot()
+
+    # ---- thumbnail ---------------------------------------------------------------------------
+    def thumbnail_payload(p: Project, path: str) -> dict:
+        from . import thumbnail as TH
+        s = TH.initial(p, path)
+        out: dict[str, Any] = {"settings": s.model_dump(), "enabled": p.export.make_thumbnail,
+                               "presets": [{"width": w, "height": h} for w, h in TH.PRESETS],
+                               "preview": None, "error": None}
+        if s.image and Path(s.image).is_file():
+            try:
+                out["preview"] = TH.preview(s, ops.cache_dir(path) / "thumbnail")
+            except (TH.ThumbnailError, OSError) as e:
+                out["error"] = str(e)
+        return out
+
+    @app.get("/api/projects/thumbnail", dependencies=[Depends(auth)])
+    def get_thumbnail(path: str) -> dict:
+        return thumbnail_payload(load(path), path)
+
+    @app.put("/api/projects/thumbnail", dependencies=[Depends(auth)])
+    def put_thumbnail(body: ThumbnailIn) -> dict:
+        from pydantic import ValidationError
+        from . import thumbnail as TH
+        p = load(body.path)
+        changes = dict(body.changes)
+        enabled = changes.pop("enabled", None)
+        try:
+            if changes:
+                TH.update(p, body.path, changes)
+            if enabled is not None:
+                p.export.make_thumbnail = bool(enabled)
+                p.save(body.path)
+        except (TH.ThumbnailError, ValidationError) as e:
+            raise HTTPException(400, str(e))
+        return thumbnail_payload(p, body.path)
+
+    @app.get("/api/thumbnail/font", dependencies=[Depends(auth)])
+    def thumbnail_font() -> FileResponse:
+        """The badge typeface, so the export screen draws the badge while it is dragged exactly like the engine."""
+        from . import thumbnail as TH
+        return FileResponse(str(TH.FONT), media_type="font/ttf", headers={"Cache-Control": "max-age=86400"})
 
     # ---- projects, automation, previews ------------------------------------------------------
     def running_projects() -> set[str]:

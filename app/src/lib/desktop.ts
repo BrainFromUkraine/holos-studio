@@ -43,6 +43,10 @@ export function dirname(p: string): string {
   return i > 0 ? p.slice(0, i) : p;
 }
 
+export function basename(p: string): string {
+  return p.split(/[\\/]/).pop() ?? p;
+}
+
 export function joinPath(dir: string, name: string): string {
   const sep = dir.includes("\\") ? "\\" : "/";
   return dir.endsWith(sep) ? dir + name : dir + sep + name;

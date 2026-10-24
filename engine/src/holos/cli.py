@@ -225,8 +225,9 @@ def export_cmd(project: Path,
                wav: Annotated[Optional[bool], typer.Option("--wav/--no-wav")] = None,
                mp3: Annotated[Optional[bool], typer.Option("--mp3/--no-mp3")] = None,
                timecodes: Annotated[Optional[bool], typer.Option("--timecodes/--no-timecodes", help="YouTube timecodes file.")] = None,
-               embed_chapters: Annotated[Optional[bool], typer.Option("--embed-chapters/--no-embed-chapters")] = None) -> None:
-    """Deliverables: WAV / MP3, YouTube timecodes, video through a template (chapters embedded)."""
+               embed_chapters: Annotated[Optional[bool], typer.Option("--embed-chapters/--no-embed-chapters")] = None,
+               thumbnail: Annotated[Optional[bool], typer.Option("--thumbnail/--no-thumbnail", help="Thumbnail picture (set it up in the app or via MCP).")] = None) -> None:
+    """Deliverables: WAV / MP3, YouTube timecodes, video through a template (chapters embedded), thumbnail."""
     from .ops import export_project
     v = None
     if video:
@@ -243,7 +244,8 @@ def export_cmd(project: Path,
                     else raw.lower() in ("1", "true", "yes", "так")
         v = {"template": video, "params": params}
     t0 = time.time()
-    r = export_project(project, out, name, wav, mp3, timecodes, embed_chapters, v, preview, _cli_progress)
+    r = export_project(project, out, name, wav, mp3, timecodes, embed_chapters, v, preview, _cli_progress,
+                       thumbnail=thumbnail)
     _echo(f"Done in {time.time() - t0:.0f}s → {r['out_dir']}")
     for k, f in r["files"].items():
         _echo(f"  {k:9s} {f}")

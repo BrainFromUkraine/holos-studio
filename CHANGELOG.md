@@ -6,6 +6,22 @@ All notable changes to Holos Studio. Versions follow [Semantic Versioning](https
 Every release has an English and a Ukrainian part. The release page on GitHub shows both; the update banner in the
 app shows the part in the interface language. Sections: **New**, **Improved**, **Fixed**, **Removed**, **Known limitations**.
 
+## [Unreleased]
+
+### English
+
+#### New
+
+- **Thumbnail in the export.** Tick **Thumbnail** in Export, add your picture (it is copied into the project's `Assets` folder) and choose the size: HD, Full HD, 2K, 4K, square or your own. The picture fills the frame and is cropped evenly. A badge with the episode number (text with `{n}`, colours, size, width, tilt) is dragged into place with the mouse or nudged with the arrow keys. The export writes `thumbnail.jpg` or `thumbnail.png` next to the episode; JPG is the default because YouTube accepts thumbnails up to 2 MB, and a bigger PNG is reported. The next episode starts from the same picture and badge with the number + 1.
+- **Claude can set up the thumbnail** through MCP: `get_thumbnail`, `set_thumbnail`, and `export` with `thumbnail`.
+
+### Українською
+
+#### Нове
+
+- **Тумбнейл в експорті.** Позначте **Тумбнейл** в Експорті, додайте свою картинку (вона копіюється в папку проєкту `Assets`) і виберіть розмір: HD, Full HD, 2K, 4K, квадрат або свій. Картинка заповнює кадр і рівно обрізається по краях. Плашку з номером випуску (текст з `{n}`, кольори, розмір, ширина, нахил) перетягуєте мишкою або зсуваєте стрілками. Експорт кладе `thumbnail.jpg` або `thumbnail.png` поруч із випуском; за замовчуванням JPG, бо YouTube приймає тумбнейли до 2 МБ, а про завеликий PNG буде попередження. Наступний випуск починається з тієї ж картинки й плашки з номером + 1.
+- **Claude може налаштувати тумбнейл** через MCP: `get_thumbnail`, `set_thumbnail` і `export` з `thumbnail`.
+
 ## [0.2.0-beta.6] — 2026-10-17
 
 Analyze and Auto-edit in the editor; the editor plays the finished sound.

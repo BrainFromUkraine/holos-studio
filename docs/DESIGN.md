@@ -69,8 +69,9 @@ always English (`Projects`, `Recordings`, `export`, `timecodes.txt`).
    (repeats, retakes, fillers) or kept (fragments, sounds, unclear speech), loudness preset, level match,
    drop-out fill, voice chain toggles. Changes re-apply immediately; hand edits are never overridden.
 5. **Export** — audio only (WAV / MP3 with chapters) or video through a template with a live preview
-   rendered from the episode; editable timecodes (or ask Claude via MCP); pre-export checks; files go to
-   `export\` inside the project folder.
+   rendered from the episode; editable timecodes (or ask Claude via MCP); thumbnail (the user's picture copied
+   into `Assets\`, size preset or custom, cover crop, episode badge dragged on the preview, remembered for the next
+   episode with the number + 1); pre-export checks; files go to `export\` inside the project folder.
 6. **Settings** — interface language (English by default, Ukrainian), step-by-step MCP setup with the ready
    configuration, folders, version.
 

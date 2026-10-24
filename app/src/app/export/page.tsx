@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EngineBanner, useEngine } from "@/components/Shell";
+import { ThumbnailEditor } from "@/components/ThumbnailEditor";
 import { dirname, isDesktop, joinPath, pickFile, revealFile } from "@/lib/desktop";
 import {
   currentProject, engine, fmtClock, fmtDuration, parseTimecode,
-  type ExportResult, type Job, type Summary, type TemplateInfo, type TemplateParam,
+  type ExportResult, type Job, type Summary, type TemplateInfo, type TemplateParam, type ThumbnailState,
 } from "@/lib/engine";
 import { t, useLang } from "@/lib/i18n";
 
@@ -15,7 +16,7 @@ type Row = { key: number; time: string; title: string; orig?: number };
 type Prev = { state: "idle" | "busy" | "ready" | "error"; video?: string; poster?: string; error?: string; need?: "modules" | "fill"; started?: number };
 
 const stageLabel = (stage: string): string | undefined => ({
-  render: t("Mixing and processing audio"), wav: "WAV", mp3: t("MP3 with chapters"), video: t("Video"), mux: t("Adding audio and chapters to the video"), done: t("Done"),
+  render: t("Mixing and processing audio"), wav: "WAV", mp3: t("MP3 with chapters"), thumbnail: t("Thumbnail"), video: t("Video"), mux: t("Adding audio and chapters to the video"), done: t("Done"),
 } as Record<string, string>)[stage];
 let rowKey = 0;
 const toRows = (s: Summary | null, hours: boolean): Row[] => (s?.chapters ?? []).map((c) => ({ key: ++rowKey, time: fmtClock(c.time, hours), title: c.title, orig: c.time }));
@@ -36,6 +37,8 @@ export default function ExportPage() {
   const [params, setParams] = useState<Record<string, unknown>>({});
   const [wav, setWav] = useState(true);
   const [mp3, setMp3] = useState(true);
+  const [thumbOn, setThumbOn] = useState(false);
+  const [thumb, setThumb] = useState<ThumbnailState | null>(null);
   const [posters, setPosters] = useState<Record<string, string>>({});
   const [prev, setPrev] = useState<Prev>({ state: "idle" });
   const [rows, setRows] = useState<Row[]>([]);
@@ -68,6 +71,7 @@ export default function ExportPage() {
     const p = currentProject.get();
     setPath(p);
     if (!p || !health) return;
+    engine.thumbnail(p).then((th) => { setThumb(th); setThumbOn(th.enabled); }).catch(() => {});
     Promise.all([load(p, true), engine.templates(p)]).then(([sum, t]) => {
       setTpls(t.templates);
       const chosen = t.templates.find((x) => x.id === sum.export.video.template && x.ready);
@@ -170,15 +174,30 @@ export default function ExportPage() {
 
   // ---- export -----------------------------------------------------------------------------------
   const video = mode === "video" && tpl;
+  const ts = thumb?.settings;
+  const thumbBlocker = !thumbOn || !ts ? null
+    : !ts.image ? t("Add a picture for the thumbnail")
+    : ts.badge.enabled && ts.badge.text.includes("{n}") && ts.episode == null ? t("Enter the episode number for the thumbnail") : null;
   const blocker = (video && !tpl!.ready && t("Template is missing modules")) || (video && missingRequired(tpl, params).length && t("Fill in: {fields}", { fields: missingRequired(tpl, params).map((p) => p.label).join(", ") }))
-    || (dirty && t("Save the timecodes first")) || (!wav && !mp3 && !video && t("Nothing selected")) || null;
+    || (dirty && t("Save the timecodes first")) || thumbBlocker || (!wav && !mp3 && !video && !thumbOn && t("Nothing selected")) || null;
+  const episodeParam = video && tpl!.params.some((p) => p.key === "episode") && typeof params.episode === "number" ? (params.episode as number) : null;
+
+  const toggleThumb = async (on: boolean) => {
+    setThumbOn(on);
+    if (!path) return;
+    try {
+      setThumb(await engine.setThumbnail(path, { enabled: on }));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const start = async () => {
     if (!path) return;
     setErr(null);
     setResult(null);
     try {
-      const j = await engine.exportProject({ path, wav, mp3, chapters_txt: true, chapters_embed: true, video: { template: video ? tpl!.id : null, params: video ? params : {} } });
+      const j = await engine.exportProject({ path, wav, mp3, chapters_txt: true, chapters_embed: true, video: { template: video ? tpl!.id : null, params: video ? params : {} }, thumbnail: thumbOn });
       setJob(j);
       engine.watch(j.id, (u) => {
         setJob(u);
@@ -203,6 +222,7 @@ export default function ExportPage() {
   if (wav) files.push(["WAV", `${name}.wav`, "var(--text2)"]);
   if (mp3) files.push(["MP3", `${name}.mp3`, "var(--text2)"]);
   if (video) files.push(["MP4", `${name}.mp4`, "var(--loud)"]);
+  if (thumbOn) files.push([(ts?.format ?? "jpg").toUpperCase(), `thumbnail.${ts?.format ?? "jpg"}`, "var(--breath)"]);
   if (rows.length) files.push(["TXT", "timecodes.txt", "var(--core)"]);
   const warn = s?.chapter_warnings ?? [];
   const prevMsg = prev.need === "modules" && tpl ? t("This template is missing Python modules: {modules}", { modules: tpl.missing.join(", ") })
@@ -255,6 +275,7 @@ export default function ExportPage() {
         <h2 className="section-title" style={{ marginTop: 4 }}>{t("Formats")}</h2>
         <label className="check"><input type="checkbox" checked={wav} disabled={running} onChange={(e) => setWav(e.target.checked)} />WAV <span className="muted" style={{ fontSize: 12 }}>{t("24-bit · 48 kHz — master")}</span></label>
         <label className="check"><input type="checkbox" checked={mp3} disabled={running} onChange={(e) => setMp3(e.target.checked)} />MP3 <span className="muted" style={{ fontSize: 12 }}>{t("192 kbps, chapters embedded")}</span></label>
+        <label className="check"><input type="checkbox" checked={thumbOn} disabled={running} onChange={(e) => toggleThumb(e.target.checked)} />{t("Thumbnail")} <span className="muted" style={{ fontSize: 12 }}>{t("your picture with the episode number")}</span></label>
       </section>
 
       <section aria-label={t("Preview and timecodes")} style={{ flex: "999 1 560px", minWidth: 0, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
@@ -284,6 +305,16 @@ export default function ExportPage() {
                 </div>
               )}
             </div>
+          </>
+        )}
+
+        {thumbOn && (
+          <>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+              <h2 className="section-title">{t("Thumbnail")}</h2>
+              <span className="muted" style={{ fontSize: 12 }}>{t("the settings are remembered for the next episode, with the number + 1")}</span>
+            </div>
+            <ThumbnailEditor path={path} disabled={running} onState={setThumb} episodeHint={episodeParam} />
           </>
         )}
 
@@ -360,6 +391,9 @@ export default function ExportPage() {
                 </li>
               ))}
             </ul>
+            {result.warnings.filter((w) => w.startsWith("thumbnail")).map((w) => (
+              <div key={w} className="banner" style={{ fontSize: 12 }}>{translateWarning(w)}</div>
+            ))}
           </div>
         )}
         <div className="muted" style={{ fontSize: 12, lineHeight: 1.55, marginTop: "auto" }}>{t("After rendering, loudness and peaks are measured again and a report is saved alongside.")}</div>
@@ -442,5 +476,7 @@ function translateWarning(w: string): string {
   if (few) return t("YouTube shows chapters only when there are at least {n}.", { n: few[1] });
   const short = w.match(/^chapter '(.*)' is shorter than (\d+) s$/);
   if (short) return t("Chapter “{title}” is shorter than {n} s — YouTube won’t show it.", { title: short[1], n: short[2] });
+  const big = w.match(/^thumbnail is ([\d.]+) MB/);
+  if (big) return t("The thumbnail is {mb} MB — YouTube accepts up to 2 MB. Choose JPG or a smaller size.", { mb: big[1] });
   return w;
 }

@@ -131,6 +131,49 @@ export type ExportRequest = {
   chapters_embed?: boolean;
   video?: { template: string | null; params: Record<string, unknown> } | null;
   preview?: number;
+  thumbnail?: boolean;
+};
+
+export type Badge = {
+  enabled: boolean;
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  angle: number;
+  fill: string;
+  ink: string;
+  chamfer: number;
+  font: number;
+  baseline: number;
+  text_width: number;
+  squeeze: number;
+};
+
+export type ThumbnailSettings = {
+  image: string | null;
+  width: number;
+  height: number;
+  format: "png" | "jpg";
+  episode: number | null;
+  badge: Badge;
+};
+
+export type ThumbnailState = {
+  settings: ThumbnailSettings;
+  enabled: boolean;
+  presets: { width: number; height: number }[];
+  preview: {
+    image: string;
+    base: string;
+    width: number;
+    height: number;
+    key: string;
+    text: string;
+    placement: { scale: number; left: number; top: number; image_w: number; image_h: number; out_w: number; out_h: number };
+  } | null;
+  error: string | null;
 };
 
 export type ExportResult = {
@@ -255,6 +298,11 @@ export const engine = {
   setChapters: (path: string, chapters: { time: number; title: string }[]) =>
     call<Summary>("PUT", "/api/projects/chapters", { path, chapters }),
   exportProject: (req: ExportRequest) => call<Job>("POST", "/api/projects/export", req),
+  thumbnail: (path: string) => call<ThumbnailState>("GET", `/api/projects/thumbnail?path=${encodeURIComponent(path)}`),
+  /** Change thumbnail settings; `image` outside the project is copied into it; `enabled` = make it on export. */
+  setThumbnail: (path: string, changes: Partial<Omit<ThumbnailSettings, "badge">> & { badge?: Partial<Badge>; enabled?: boolean }) =>
+    call<ThumbnailState>("PUT", "/api/projects/thumbnail", { path, changes }),
+  thumbnailFontUrl: () => `${ENGINE_URL}/api/thumbnail/font?token=${encodeURIComponent(token())}`,
   timeline: (path: string) => call<Timeline>("GET", `/api/projects/timeline?path=${encodeURIComponent(path)}`),
   edit: (req: EditRequest) => call<Timeline & { id?: string; undone?: string | null; redone?: string | null }>("POST", "/api/projects/edit", req),
   /** URL for <audio>/<img> (they can't send headers, so the token goes in the query). */

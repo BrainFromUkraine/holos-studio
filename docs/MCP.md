@@ -52,7 +52,8 @@ Times are in the finished episode (after cuts) as `MM:SS`, `H:MM:SS` or seconds.
 | `get_automation` / `set_automation` | Pause thresholds, breaths, mouth clicks, what kinds of mistakes are cut |
 | `get_chapters` / `set_chapters` | Timecodes; they stay attached to the speech and follow later edits |
 | `list_templates` | Video templates with their parameters |
-| `export` | WAV / MP3 with chapters, YouTube timecodes and, with a template, video (background job) |
+| `get_thumbnail` / `set_thumbnail` | Thumbnail: picture (copied into the project), size, JPG / PNG, episode number, badge text, position, size, tilt, colours |
+| `export` | WAV / MP3 with chapters, YouTube timecodes, with a template video, with `thumbnail` the thumbnail (background job) |
 
 Edits you changed by hand are never overridden when Claude changes the automation.
 
@@ -62,3 +63,4 @@ Edits you changed by hand are never overridden when Claude changes the automatio
 - *"Pauses feel too short — make them up to 0.9 s."*
 - *"Cut the part where I talk about the delivery, around 14:30."*
 - *"Export the latest episode with the waveform template."*
+- *"Make the thumbnail for episode 5 in 1280×720."*

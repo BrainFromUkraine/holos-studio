@@ -153,6 +153,34 @@ class TimelineSettings(BaseModel):
     crossfade: float = 0.04
 
 
+class Badge(BaseModel):
+    """The plate with the episode number on a thumbnail. Position in fractions of the picture (centre),
+    size in fractions of the picture's height; `angle` in degrees, clockwise."""
+    enabled: bool = True
+    text: str = "EPISODE {n}"       # {n} = episode number
+    x: float = Field(0.5, ge=-0.5, le=1.5)
+    y: float = Field(0.85, ge=-0.5, le=1.5)
+    width: float = Field(0.42, gt=0, le=4)
+    height: float = Field(0.10, gt=0, le=1)
+    angle: float = Field(0.0, ge=-45, le=45)
+    fill: str = "#FFFFFF"
+    ink: str = "#0A0B0A"
+    chamfer: float = Field(0.125, ge=0, le=0.5)       # cut corners, fraction of the badge height
+    font: float = Field(0.6875, gt=0, le=2)           # type size, fraction of the badge height
+    baseline: float = Field(0.24, ge=-1, le=1)        # text baseline below the centre, fraction of the height
+    text_width: float = Field(0.78, gt=0, le=1)       # text fits in this share of the badge width
+    squeeze: float = Field(0.8, gt=0, le=1.5)         # horizontal scale of the type (condensed look)
+
+
+class ThumbnailSettings(BaseModel):
+    image: str | None = None        # picture in the project's Assets folder
+    width: int = Field(1920, ge=16, le=8192)
+    height: int = Field(1080, ge=16, le=8192)
+    format: Literal["png", "jpg"] = "jpg"            # YouTube takes thumbnails up to 2 MB
+    episode: int | None = None
+    badge: Badge = Badge()
+
+
 class ExportSettings(BaseModel):
     wav: bool = True
     wav_bits: Literal[16, 24, 32] = 24
@@ -162,6 +190,8 @@ class ExportSettings(BaseModel):
     chapters_txt: bool = True       # YouTube description timecodes
     chapters_embed: bool = True     # chapters inside MP3 / MP4
     video: VideoExport = VideoExport()
+    make_thumbnail: bool = False    # thumbnail.png / .jpg with the export
+    thumbnail: ThumbnailSettings | None = None   # None: not set up in this project yet (last used ones are offered)
 
 
 def default_chain() -> list[ChainStep]:

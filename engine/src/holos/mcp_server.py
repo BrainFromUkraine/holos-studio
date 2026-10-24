@@ -32,6 +32,7 @@ mcp = MCPServer(
         "back, undo reverts the last change (shared with the user's own history). "
         "Chapters: read get_transcript, choose topic boundaries, call set_chapters — short titles (2–6 words) in "
         "the episode's language; YouTube needs the first at 00:00, at least 3, each ≥ 10 s. "
+        "Thumbnail: get_thumbnail / set_thumbnail (picture, size, episode number, badge), made by export. "
         "Long work (new_episode, export) runs as a job: poll job_status."
     ),
 )
@@ -293,13 +294,51 @@ def list_templates(path: str | None = None) -> list[dict]:
 
 @mcp.tool(annotations=RW)
 def export(path: str, video_template: str | None = None, video_params: dict | None = None,
-           wav: bool = True, mp3: bool = True) -> dict:
+           wav: bool = True, mp3: bool = True, thumbnail: bool | None = None) -> dict:
     """Render the finished episode into the project's export folder: WAV / MP3 with chapters, the YouTube
-    timecodes file and, with video_template, an MP4. Returns a job id (poll job_status)."""
+    timecodes file, with video_template an MP4, and with thumbnail=true the thumbnail picture (None keeps the
+    project's choice). Returns a job id (poll job_status)."""
     _load(path)
     video = {"template": video_template, "params": video_params or {}} if video_template else {"template": None}
     return _start_job("export", lambda progress: ops.export_project(path, None, None, wav, mp3, True, True,
-                                                                   video, 0, progress))
+                                                                   video, 0, progress, thumbnail=thumbnail))
+
+
+# ---- thumbnail ------------------------------------------------------------------------------------
+def _thumb_info(p: Project, path: str) -> dict:
+    from . import thumbnail as TH
+    s = TH.initial(p, path)
+    text = None
+    try:
+        text = TH.badge_text(s) if s.badge.enabled else ""
+    except TH.ThumbnailError as e:
+        text = f"! {e}"
+    return {"settings": s.model_dump(), "with_export": p.export.make_thumbnail, "badge_text": text,
+            "size": f"{s.width}x{s.height}", "picture_ok": bool(s.image and Path(s.image).is_file())}
+
+
+@mcp.tool(annotations=RO)
+def get_thumbnail(path: str) -> dict:
+    """Thumbnail settings: picture, output size, format, episode number and the badge (position x / y as fractions
+    of the picture, width / height as fractions of the picture's height, angle in degrees clockwise, colours)."""
+    return _thumb_info(_load(path), path)
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True))
+def set_thumbnail(path: str, changes: dict) -> dict:
+    """Change thumbnail settings, e.g. {"episode": 5}, {"width": 1280, "height": 720}, {"format": "jpg"},
+    {"image": "C:/pics/cover.png"} (copied into the project), {"badge": {"text": "ВИПУСК {n}", "x": 0.4}},
+    {"with_export": true} to make it on every export of this project."""
+    from . import thumbnail as TH
+    p = _load(path)
+    changes = dict(changes)
+    with_export = changes.pop("with_export", None)
+    if changes:
+        TH.update(p, path, changes)
+    if with_export is not None:
+        p.export.make_thumbnail = bool(with_export)
+        p.save(path)
+    return _thumb_info(p, path)
 
 
 def main() -> None:

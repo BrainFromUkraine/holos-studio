@@ -6,7 +6,9 @@ All notable changes to Holos Studio. Versions follow [Semantic Versioning](https
 Every release has an English and a Ukrainian part. The release page on GitHub shows both; the update banner in the
 app shows the part in the interface language. Sections: **New**, **Improved**, **Fixed**, **Removed**, **Known limitations**.
 
-## [Unreleased]
+## [0.2.0-beta.8] — 2026-10-24
+
+Track height zoom like DaVinci.
 
 ### English
 

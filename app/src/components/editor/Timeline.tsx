@@ -26,6 +26,11 @@ export const RULER_H = 26;
 export const MARK_H = 28;
 export const SPEC_H = 140;
 export const LOUD_H = 60;
+/** Voice track height limits (vertical zoom changes the track height, like a DaVinci / Fairlight track). */
+export const TRACK_MIN = 48;
+export const TRACK_MAX = 2400;
+/** Ruler + markers stay on top while the lanes below scroll vertically. */
+export const PINNED_H = RULER_H + MARK_H;
 
 const C = {
   bg: "#0A0B0A", lane: "#080908", border: "#262926", clip: "#0D1A12", clipLine: "#23452F", clipHead: "#1B3A27",
@@ -51,9 +56,11 @@ type Props = {
   clips: ClipBox[];
   assets: Assets;
   view: View;
-  vzoom: number; // waveform height multiplier (vertical zoom), 1 = fit
+  vzoom: number; // voice track height multiplier (vertical zoom), 1 = fits the window
   width: number;
   height: number;
+  scrollY: number; // vertical scroll of the lanes under the ruler and markers (px)
+  onScrollY: (y: number) => void;
   tool: Tool;
   sel: ESel;
   splits: number[];
@@ -75,21 +82,28 @@ type Drag =
 
 const STEPS = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
 
-export function useLayout(height: number, showSpec: boolean) {
+/** Lane positions. The voice track fills the window at vertical zoom 1 and grows / shrinks with it; when the lanes
+ *  are taller than the window they scroll (`maxScroll`) under the pinned ruler and markers. */
+export function useLayout(height: number, showSpec: boolean, vzoom = 1) {
   return useMemo(() => {
     const spec = showSpec ? SPEC_H : 0;
-    const track = Math.max(140, height - RULER_H - MARK_H - spec - LOUD_H);
+    const fit = Math.max(140, height - PINNED_H - spec - LOUD_H);
+    const track = Math.round(Math.max(TRACK_MIN, Math.min(TRACK_MAX, fit * vzoom)));
     let y = 0;
     const L = { ruler: { y, h: RULER_H }, markers: { y: (y += RULER_H), h: MARK_H }, track: { y: (y += MARK_H), h: track }, spec: { y: (y += track), h: spec }, loud: { y: (y += spec), h: LOUD_H } };
-    return { ...L, total: y + LOUD_H };
-  }, [height, showSpec]);
+    const total = y + LOUD_H;
+    const view = Math.max(PINNED_H + 1, height);
+    return { ...L, total, fit, view, maxScroll: Math.max(0, total - view) };
+  }, [height, showSpec, vzoom]);
 }
 
 export function TimelineCanvas(props: Props) {
-  const { tl, pieces, clips, assets, view, vzoom, width, tool, sel, splits, playhead, showSpec, onView, onSelect, onSeek, onSplit, onMarkerMove, onMarkerAdd } = props;
+  const { tl, pieces, clips, assets, view, vzoom, width, tool, sel, splits, playhead, showSpec, onView, onSelect, onSeek, onSplit, onMarkerMove, onMarkerAdd, onScrollY } = props;
   const lang = useLang();
   const cv = useRef<HTMLCanvasElement>(null);
-  const L = useLayout(props.height, showSpec);
+  const L = useLayout(props.height, showSpec, vzoom);
+  const oy = Math.max(0, Math.min(L.maxScroll, props.scrollY));   // the lanes below the markers are drawn shifted up by oy
+  const H = L.view;                                                // canvas height = the window
   const [drag, setDrag] = useState<Drag>(null);
   const [liveMarker, setLiveMarker] = useState<{ i: number; T: number } | null>(null);
   const [cursor, setCursor] = useState("default");
@@ -104,57 +118,19 @@ export function TimelineCanvas(props: Props) {
     if (!c || width <= 0) return;
     const dpr = window.devicePixelRatio || 1;
     c.width = Math.round(width * dpr);
-    c.height = Math.round(L.total * dpr);
+    c.height = Math.round(H * dpr);
     const ctx = c.getContext("2d")!;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const W = width;
     ctx.fillStyle = C.bg;
-    ctx.fillRect(0, 0, W, L.total);
+    ctx.fillRect(0, 0, W, H);
 
-    // ruler (episode time)
-    ctx.fillStyle = "#141614";
-    ctx.fillRect(0, L.ruler.y, W, L.ruler.h);
-    const step = STEPS.find((s) => s * view.pps >= 80) ?? 600;
-    ctx.font = "10px 'IBM Plex Mono', monospace";
-    ctx.textBaseline = "top";
-    for (let t = Math.floor(view.x0 / step) * step; sx(t) < W; t += step) {
-      const x = Math.round(sx(t)) + 0.5;
-      if (x < -60) continue;
-      ctx.fillStyle = C.muted;
-      ctx.fillRect(x, L.ruler.y + 15, 1, 11);
-      const m = Math.floor(t / 60);
-      const s = t - m * 60;
-      ctx.fillText(step < 1 ? `${m}:${s.toFixed(1).padStart(4, "0")}` : `${m}:${String(Math.round(s)).padStart(2, "0")}`, x + 4, L.ruler.y + 4);
-      ctx.fillStyle = C.dim;
-      ctx.fillRect(Math.round(sx(t + step / 2)), L.ruler.y + 20, 1, 6);
-    }
-
-    // markers lane (chapters)
-    ctx.fillStyle = "#0D0F0D";
-    ctx.fillRect(0, L.markers.y, W, L.markers.h);
-    ctx.font = "600 11px 'IBM Plex Sans', system-ui, sans-serif";
-    ctx.textBaseline = "middle";
-    markers.forEach((m, i) => {
-      const x = sx(m.time);
-      if (x > W) return;
-      const label = `${fmtShort(m.time)} ${m.title}`;
-      const next = markers[i + 1] ? sx(markers[i + 1].time) - 3 : Infinity;   // never run into the next flag
-      const w = Math.max(8, Math.min(ctx.measureText(label).width + 22, next - x));
-      if (x + w < 0) return;
-      const on = sel?.kind === "marker" && sel.i === i;
-      ctx.fillStyle = on ? C.sel : C.marker;
-      ctx.fillRect(x, L.markers.y + 5, w, 18);
-      ctx.fillStyle = "#0A0B0A";
-      ctx.fillRect(x + 5, L.markers.y + 8, 1.5, 12);
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(x, L.markers.y, w - 4, L.markers.h);
-      ctx.clip();
-      ctx.fillText(label, x + 12, L.markers.y + 14);
-      ctx.restore();
-      ctx.fillStyle = on ? C.sel : "rgba(63,209,122,0.35)";
-      ctx.fillRect(x, L.track.y, 1, L.track.h + L.spec.h + L.loud.h);
-    });
+    // lanes under the pinned ruler + markers: shifted by the vertical scroll and clipped below the markers
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, PINNED_H, W, H - PINNED_H);
+    ctx.clip();
+    ctx.translate(0, -oy);
 
     // track lane
     const ty = L.track.y;
@@ -186,9 +162,9 @@ export function TimelineCanvas(props: Props) {
     }
     // waveform over all kept pieces
     const wy = ty + HEAD + 6;
-    const wh = th - HEAD - 10;
+    const wh = Math.max(8, th - HEAD - 10);
     const mid = wy + wh / 2;
-    const amp = (wh / 2) * 1.25 * vzoom;
+    const amp = (wh / 2) * 1.25;
     let pi = Math.max(0, pieceIndex(pieces, xs(0)));
     for (let px = 0; px < W; px++) {
       const T = xs(px);
@@ -317,7 +293,7 @@ export function TimelineCanvas(props: Props) {
         const w = ctx.measureText(label).width + 10;
         const row = i % 2;
         const yTag = ty + 24 + row * 19;
-        if (view.pps > 4 || on) {
+        if ((view.pps > 4 || on) && th >= 64) {      // a low track has no room for the tags
           ctx.fillStyle = col;
           ctx.fillRect(x + 3, yTag, w, 16);
           ctx.fillStyle = isPause || on ? "#0A0B0A" : "#FFFFFF";
@@ -341,6 +317,14 @@ export function TimelineCanvas(props: Props) {
     }
     ctx.setLineDash([]);
 
+    // chapter lines through the lanes
+    markers.forEach((m, i) => {
+      const x = sx(m.time);
+      if (x < -1 || x > W) return;
+      ctx.fillStyle = sel?.kind === "marker" && sel.i === i ? C.sel : "rgba(63,209,122,0.35)";
+      ctx.fillRect(x, L.track.y, 1, L.track.h + L.spec.h + L.loud.h);
+    });
+
     // range selection
     if (sel?.kind === "range") {
       const x0 = sx(Math.min(sel.A, sel.B));
@@ -354,10 +338,63 @@ export function TimelineCanvas(props: Props) {
 
     // lane separators
     ctx.fillStyle = C.border;
-    for (const y of [L.markers.y, L.track.y, L.spec.y, L.loud.y, L.total - 1]) ctx.fillRect(0, y - 1, W, 1);
-  }, [tl, pieces, clips, assets, assets.version, view, vzoom, width, L, sel, splits, showSpec, markers, sx, xs, lang]);
+    for (const y of [L.spec.y, L.loud.y, L.total]) ctx.fillRect(0, y - 1, W, 1);
+    ctx.restore();
+
+    // ruler (episode time)
+    ctx.fillStyle = "#141614";
+    ctx.fillRect(0, L.ruler.y, W, L.ruler.h);
+    const step = STEPS.find((s) => s * view.pps >= 80) ?? 600;
+    ctx.font = "10px 'IBM Plex Mono', monospace";
+    ctx.textBaseline = "top";
+    for (let t = Math.floor(view.x0 / step) * step; sx(t) < W; t += step) {
+      const x = Math.round(sx(t)) + 0.5;
+      if (x < -60) continue;
+      ctx.fillStyle = C.muted;
+      ctx.fillRect(x, L.ruler.y + 15, 1, 11);
+      const m = Math.floor(t / 60);
+      const s = t - m * 60;
+      ctx.fillText(step < 1 ? `${m}:${s.toFixed(1).padStart(4, "0")}` : `${m}:${String(Math.round(s)).padStart(2, "0")}`, x + 4, L.ruler.y + 4);
+      ctx.fillStyle = C.dim;
+      ctx.fillRect(Math.round(sx(t + step / 2)), L.ruler.y + 20, 1, 6);
+    }
+
+    // markers lane (chapters)
+    ctx.fillStyle = "#0D0F0D";
+    ctx.fillRect(0, L.markers.y, W, L.markers.h);
+    ctx.font = "600 11px 'IBM Plex Sans', system-ui, sans-serif";
+    ctx.textBaseline = "middle";
+    markers.forEach((m, i) => {
+      const x = sx(m.time);
+      if (x > W) return;
+      const label = `${fmtShort(m.time)} ${m.title}`;
+      const next = markers[i + 1] ? sx(markers[i + 1].time) - 3 : Infinity;   // never run into the next flag
+      const w = Math.max(8, Math.min(ctx.measureText(label).width + 22, next - x));
+      if (x + w < 0) return;
+      const on = sel?.kind === "marker" && sel.i === i;
+      ctx.fillStyle = on ? C.sel : C.marker;
+      ctx.fillRect(x, L.markers.y + 5, w, 18);
+      ctx.fillStyle = "#0A0B0A";
+      ctx.fillRect(x + 5, L.markers.y + 8, 1.5, 12);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, L.markers.y, w - 4, L.markers.h);
+      ctx.clip();
+      ctx.fillText(label, x + 12, L.markers.y + 14);
+      ctx.restore();
+    });
+
+    ctx.fillStyle = C.border;
+    for (const y of [L.markers.y, L.track.y]) ctx.fillRect(0, y - 1, W, 1);
+    if (oy > 0) {                                   // the lanes continue above: a hint under the markers
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fillRect(0, PINNED_H, W, 3);
+    }
+  }, [tl, pieces, clips, assets, assets.version, view, vzoom, width, L, H, oy, sel, splits, showSpec, markers, sx, xs, lang]);
 
   // ---- hit testing ------------------------------------------------------------------------------
+  /** Canvas y → layout y (the lanes under the markers are scrolled by oy). */
+  const cy = (y: number) => (y < PINNED_H ? y : y + oy);
   const laneAt = (y: number) => (y < L.markers.y ? "ruler" : y < L.track.y ? "markers" : y < L.spec.y ? "track" : y < L.loud.y ? "spec" : "loud");
 
   const spliceAt = (x: number, y: number): number => {
@@ -394,7 +431,7 @@ export function TimelineCanvas(props: Props) {
 
   const local = (e: React.PointerEvent) => {
     const r = cv.current!.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
+    return { x: e.clientX - r.left, y: cy(e.clientY - r.top) };
   };
   const clampT = (T: number) => Math.max(0, Math.min(tl.length ?? T, T));
 
@@ -491,6 +528,8 @@ export function TimelineCanvas(props: Props) {
         const at = view.x0 + x / view.pps;
         const pps = view.pps * Math.pow(1.0018, -ev.deltaY);
         onView({ x0: at - x / pps, pps });
+      } else if (ev.shiftKey || ev.altKey) {          // Shift / Alt + wheel: scroll the lanes up and down
+        if (L.maxScroll > 0) onScrollY(Math.max(0, Math.min(L.maxScroll, oy + (ev.deltaY || ev.deltaX))));
       } else {
         const d = Math.abs(ev.deltaX) > Math.abs(ev.deltaY) ? ev.deltaX : ev.deltaY;
         onView({ ...view, x0: view.x0 + d / view.pps });
@@ -498,18 +537,18 @@ export function TimelineCanvas(props: Props) {
     };
     c.addEventListener("wheel", wheel, { passive: false });
     return () => c.removeEventListener("wheel", wheel);
-  }, [view, onView]);
+  }, [view, onView, L.maxScroll, oy, onScrollY]);
 
   const ph = sx(playhead);
   return (
-    <div style={{ position: "relative", height: L.total }}>
-      <canvas ref={cv} role="img" aria-label={t("Episode timeline")} style={{ display: "block", width, height: L.total, cursor, touchAction: "none" }}
+    <div style={{ position: "relative", height: H }}>
+      <canvas ref={cv} role="img" aria-label={t("Episode timeline")} style={{ display: "block", width, height: H, cursor, touchAction: "none" }}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}
         onDoubleClick={(e) => {
           // pointer events carry no click count, so double-click is handled here: new marker on the markers lane
           const r = cv.current!.getBoundingClientRect();
           const x = e.clientX - r.left;
-          const y = e.clientY - r.top;
+          const y = cy(e.clientY - r.top);
           if (laneAt(y) === "markers" && markerAt(x) < 0) onMarkerAdd(clampT(xs(x)));
         }} />
       {ph >= 0 && ph <= width && (
@@ -518,6 +557,37 @@ export function TimelineCanvas(props: Props) {
           <div aria-hidden="true" style={{ position: "absolute", top: 0, left: Math.round(ph) - 6, width: 0, height: 0, borderLeft: "6px solid transparent", borderRight: "6px solid transparent", borderTop: "8px solid #F4F6F4", pointerEvents: "none" }} />
         </>
       )}
+      {L.maxScroll > 0 && <VScroll top={PINNED_H} height={H - PINNED_H} content={L.total - PINNED_H} value={oy} max={L.maxScroll} onChange={onScrollY} />}
+    </div>
+  );
+}
+
+/** Thin vertical scrollbar over the right edge of the lanes (drag the thumb or click the track). */
+function VScroll({ top, height, content, value, max, onChange }: { top: number; height: number; content: number; value: number; max: number; onChange: (v: number) => void }) {
+  useLang();
+  const thumb = Math.max(24, (height * height) / content);
+  const y = max > 0 ? (value / max) * (height - thumb) : 0;
+  const from = useRef<{ y: number; v: number } | null>(null);
+  const toValue = (dy: number, v0: number) => Math.max(0, Math.min(max, v0 + (dy / Math.max(1, height - thumb)) * max));
+  return (
+    <div role="scrollbar" aria-orientation="vertical" aria-label={t("Scroll tracks")} aria-valuemin={0} aria-valuemax={Math.round(max)} aria-valuenow={Math.round(value)}
+      tabIndex={0} title={t("Scroll tracks · Shift + wheel")}
+      onKeyDown={(e) => {
+        const step = e.key === "PageDown" || e.key === "PageUp" ? height * 0.8 : 40;
+        if (e.key === "ArrowDown" || e.key === "PageDown") { e.preventDefault(); onChange(Math.min(max, value + step)); }
+        if (e.key === "ArrowUp" || e.key === "PageUp") { e.preventDefault(); onChange(Math.max(0, value - step)); }
+      }}
+      onPointerDown={(e) => {
+        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const at = e.clientY - r.top;
+        if (at < y || at > y + thumb) onChange(Math.max(0, Math.min(max, ((at - thumb / 2) / Math.max(1, height - thumb)) * max)));
+        from.current = { y: e.clientY, v: at < y || at > y + thumb ? Math.max(0, Math.min(max, ((at - thumb / 2) / Math.max(1, height - thumb)) * max)) : value };
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      }}
+      onPointerMove={(e) => { if (from.current) onChange(toValue(e.clientY - from.current.y, from.current.v)); }}
+      onPointerUp={() => { from.current = null; }}
+      style={{ position: "absolute", right: 0, top, width: 10, height, background: "rgba(8,9,8,0.7)", borderLeft: "1px solid #262926", cursor: "default", touchAction: "none" }}>
+      <div style={{ position: "absolute", left: 2, right: 2, top: y, height: thumb, background: "#3E423E" }} />
     </div>
   );
 }

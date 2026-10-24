@@ -6,6 +6,20 @@ All notable changes to Holos Studio. Versions follow [Semantic Versioning](https
 Every release has an English and a Ukrainian part. The release page on GitHub shows both; the update banner in the
 app shows the part in the interface language. Sections: **New**, **Improved**, **Fixed**, **Removed**, **Known limitations**.
 
+## [Unreleased]
+
+### English
+
+#### Improved
+
+- **Vertical zoom changes the track height**, like a DaVinci track: the whole Voice section (header and clip) gets taller or lower, and the waveform always fills it. When the tracks no longer fit, they scroll (scrollbar on the right, or Shift + wheel) while the time ruler and markers stay on top. Double-click the slider to fit the window again.
+
+### Українською
+
+#### Покращено
+
+- **Вертикальний масштаб міняє висоту доріжки**, як у DaVinci: вся секція «Голос» (заголовок і кліп) стає вищою чи нижчою, а хвиля завжди її заповнює. Коли доріжки не влазять у вікно, вони прокручуються (смуга праворуч або Shift + коліщатко), а лінійка часу й маркери лишаються зверху. Подвійний клік по повзунку повертає висоту під вікно.
+
 ## [0.2.0-beta.7] — 2026-10-24
 
 Thumbnail with the episode number, made together with the export.

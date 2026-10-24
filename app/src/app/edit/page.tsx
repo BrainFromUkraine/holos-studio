@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { EngineBanner, useEngine } from "@/components/Shell";
 import { Overview, OVERVIEW_H } from "@/components/editor/Overview";
 import { Player, type Pos } from "@/components/editor/player";
-import { drawCloseUp, spliceLabel, TimelineCanvas, type Assets, type ESel, type Tool, type View } from "@/components/editor/Timeline";
+import { drawCloseUp, PINNED_H, spliceLabel, TimelineCanvas, useLayout, type Assets, type ESel, type Tool, type View } from "@/components/editor/Timeline";
 import { currentProject, engine, type EditRequest } from "@/lib/engine";
 import { buildPieces, clipBoxes, fmtEp, rangeToSources, toSource } from "@/lib/resultmap";
 import { t, tn, useLang } from "@/lib/i18n";
@@ -13,7 +13,11 @@ import { episodeTime, reasonText, type Timeline } from "@/lib/timeline";
 
 const HEAD_W = 190;
 const MAX_PPS = 1500;
-const MAX_VZOOM = 8; // vertical zoom: waveform up to 8× taller (quiet clicks and breaths become visible)
+// vertical zoom = voice track height relative to the window (like a DaVinci / Fairlight track): smaller … 6× taller
+const MIN_VZOOM = 0.3;
+const MAX_VZOOM = 6;
+const vzToSlider = (v: number) => Math.round((Math.log(v / MIN_VZOOM) / Math.log(MAX_VZOOM / MIN_VZOOM)) * 100);
+const sliderToVz = (n: number) => MIN_VZOOM * Math.pow(MAX_VZOOM / MIN_VZOOM, n / 100);
 
 function useAssets(path: string | null, tl: Timeline | null): Assets {
   const [a, setA] = useState<Assets>({ peaks: {}, spec: {}, loud: {}, version: 0 });
@@ -65,7 +69,8 @@ export default function EditorPage() {
   const [sel, setSel] = useState<ESel>(null);
   const [splits, setSplits] = useState<number[]>([]);
   const [view, setView] = useState<View>({ x0: 0, pps: 1 });
-  const [vzoom, setVzoom] = useState(1); // waveform height multiplier (vertical zoom)
+  const [vzoom, setVzoomRaw] = useState(1); // voice track height multiplier (vertical zoom), 1 = fits the window
+  const [scrollY, setScrollY] = useState(0); // vertical scroll of the lanes (px), shared by the track headers and the canvas
   const [listen, setListen] = useState<"result" | "original">("result");
   const [job, setJob] = useState<{ kind: "analyze" | "autoedit"; stage: string; done: number; total: number } | null>(null);
   const [T, setT] = useState(0);
@@ -164,6 +169,18 @@ export default function EditorPage() {
     ro.observe(el);
     return () => ro.disconnect();
   }, [tl]);
+
+  const lay = useLayout(size.h, showSpec, vzoom);
+  const oy = Math.max(0, Math.min(lay.maxScroll, scrollY));
+  /** Change the track height and keep the middle of what is visible in place (like DaVinci). */
+  const setVzoom = useCallback((v: number) => {
+    const nv = Math.max(MIN_VZOOM, Math.min(MAX_VZOOM, v));
+    const tOld = lay.track.h, tNew = Math.round(lay.fit * nv);
+    const centre = oy + (size.h - PINNED_H) / 2;                   // layout y (below the markers) in the middle of the window
+    const moved = centre < tOld ? (centre / Math.max(1, tOld)) * tNew : centre + (tNew - tOld);
+    setVzoomRaw(nv);
+    setScrollY(Math.max(0, moved - (size.h - PINNED_H) / 2));     // clamped to the new layout when drawn
+  }, [lay.fit, lay.track.h, oy, size.h]);
 
   const minPps = width / Math.max(1, length);
   const clampView = useCallback((v: View): View => {
@@ -393,8 +410,8 @@ export default function EditorPage() {
           </label>
           <label title={t("Vertical zoom")} style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--text2)" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4" /></svg>
-            <input type="range" aria-label={t("Vertical zoom")} min={0} max={100} value={Math.round((Math.log(vzoom) / Math.log(MAX_VZOOM)) * 100)}
-              onChange={(e) => setVzoom(Math.pow(MAX_VZOOM, Number(e.target.value) / 100))} onDoubleClick={() => setVzoom(1)} style={{ width: 60 }} />
+            <input type="range" aria-label={t("Vertical zoom")} title={t("Track height · double-click: fit the window")} min={0} max={100} value={vzToSlider(vzoom)}
+              onChange={(e) => setVzoom(sliderToVz(Number(e.target.value)))} onDoubleClick={() => { setVzoomRaw(1); setScrollY(0); }} style={{ width: 60 }} />
           </label>
           <Link href="/automation/" className="btn" style={{ height: 32, display: "flex", alignItems: "center", gap: 6, textDecoration: "none" }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></svg>
@@ -436,8 +453,10 @@ export default function EditorPage() {
               <div style={{ padding: 20 }}><EngineBanner />{err ? <div className="banner error">{err}</div> : <span className="muted">{t("Loading episode…")}</span>}</div>
             ) : (
               <>
-                <TrackHeaders height={size.h} showSpec={showSpec} onToggleSpec={() => setShowSpec((s) => !s)} clipsCount={tl.sources.length} chain={tl.chain.filter((c) => c.enabled).length} />
+                <TrackHeaders lay={lay} scrollY={oy} showSpec={showSpec} onToggleSpec={() => setShowSpec((s) => !s)} clipsCount={tl.sources.length} chain={tl.chain.filter((c) => c.enabled).length}
+                  onWheel={(dy) => lay.maxScroll > 0 && setScrollY(Math.max(0, Math.min(lay.maxScroll, oy + dy)))} />
                 <TimelineCanvas tl={tl} pieces={pieces} clips={clips} assets={assets} view={view} vzoom={vzoom} width={width} height={size.h} tool={tool} sel={sel} splits={splits}
+                  scrollY={oy} onScrollY={setScrollY}
                   playhead={T} showSpec={showSpec} onView={changeView} onSelect={setSel} onSeek={seek}
                   onSplit={(t) => setSplits((s) => [...s, t].sort((a, b) => a - b))}
                   onMarkerMove={(i, t) => saveMarkers(tl.chapters.map((c, k) => ({ time: k === i ? t : c.time, title: c.title })))}
@@ -566,30 +585,47 @@ function Row({ k, v }: { k: string; v: string }) {
   );
 }
 
-function TrackHeaders({ height, showSpec, onToggleSpec, clipsCount, chain }: { height: number; showSpec: boolean; onToggleSpec: () => void; clipsCount: number; chain: number }) {
+function TrackHeaders({ lay, scrollY, showSpec, onToggleSpec, clipsCount, chain, onWheel }: {
+  lay: ReturnType<typeof useLayout>;
+  scrollY: number;
+  showSpec: boolean;
+  onToggleSpec: () => void;
+  clipsCount: number;
+  chain: number;
+  onWheel: (dy: number) => void;
+}) {
   useLang();
-  const spec = showSpec ? 140 : 0;
-  const track = Math.max(140, height - 26 - 28 - spec - 60);
+  const track = lay.track.h;
   return (
-    <div style={{ flex: `0 0 ${HEAD_W}px`, background: "var(--panel)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column" }}>
-      <div style={{ height: 26, borderBottom: "1px solid var(--border)" }} />
-      <div style={{ height: 28, borderBottom: "1px solid var(--border)", padding: "0 10px", display: "flex", alignItems: "center", fontSize: 12, color: "var(--text2)" }}>{t("Markers · chapters")}</div>
-      <div style={{ height: track, borderBottom: "1px solid var(--border)", padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span className="mono" style={{ fontSize: 11, color: "var(--core)" }}>A1</span><span style={{ fontWeight: 600, color: "var(--bright)" }}>{t("Voice")}</span></div>
-        <div className="mono muted" style={{ fontSize: 11 }}>{t("0.0 dB · stereo")}</div>
-        <div className="muted" style={{ fontSize: 11, lineHeight: 1.5 }}>{tn("{n} clip", "{n} clips", clipsCount)}<br />{tn("processing: {n} module", "processing: {n} modules", chain)}</div>
-      </div>
-      {showSpec && (
-        <div style={{ height: 140, borderBottom: "1px solid var(--border)", padding: "8px 10px", fontSize: 12 }}>
-          <div style={{ color: "var(--bright)", fontWeight: 500 }}>{t("Spectrum A1")}</div>
-          <div className="muted" style={{ fontSize: 11 }}>{t("60 Hz – 12 kHz")}</div>
-          <button className="btn" style={{ height: 24, fontSize: 11, marginTop: 8, padding: "0 8px" }} onClick={onToggleSpec}>{t("Hide")}</button>
+    <div style={{ flex: `0 0 ${HEAD_W}px`, background: "var(--panel)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", height: lay.view, overflow: "hidden" }}
+      onWheel={(e) => { if (e.shiftKey || e.altKey || !e.ctrlKey) onWheel(e.deltaY); }}>
+      {/* pinned, like the ruler and markers on the right */}
+      <div style={{ flex: "0 0 auto", height: 26, borderBottom: "1px solid var(--border)" }} />
+      <div style={{ flex: "0 0 auto", height: 28, borderBottom: "1px solid var(--border)", padding: "0 10px", display: "flex", alignItems: "center", fontSize: 12, color: "var(--text2)" }}>{t("Markers · chapters")}</div>
+      {/* the lanes' headers scroll with the lanes */}
+      <div style={{ position: "relative", flex: "1 1 auto", overflow: "hidden" }}>
+        <div style={{ position: "absolute", left: 0, right: 0, top: -scrollY }}>
+          <div style={{ height: track, borderBottom: "1px solid var(--border)", padding: track < 60 ? "0 10px" : 10, display: "flex", flexDirection: "column", justifyContent: track < 60 ? "center" : "flex-start", gap: 8, overflow: "hidden", boxSizing: "border-box" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span className="mono" style={{ fontSize: 11, color: "var(--core)" }}>A1</span><span style={{ fontWeight: 600, color: "var(--bright)" }}>{t("Voice")}</span>
+              {track < 90 && <span className="muted" style={{ marginLeft: "auto", fontSize: 11 }}>{tn("{n} clip", "{n} clips", clipsCount)}</span>}
+            </div>
+            {track >= 90 && <div className="mono muted" style={{ fontSize: 11 }}>{t("0.0 dB · stereo")}</div>}
+            {track >= 90 && <div className="muted" style={{ fontSize: 11, lineHeight: 1.5 }}>{tn("{n} clip", "{n} clips", clipsCount)}<br />{tn("processing: {n} module", "processing: {n} modules", chain)}</div>}
+          </div>
+          {showSpec && (
+            <div style={{ height: lay.spec.h, borderBottom: "1px solid var(--border)", padding: "8px 10px", fontSize: 12, boxSizing: "border-box" }}>
+              <div style={{ color: "var(--bright)", fontWeight: 500 }}>{t("Spectrum A1")}</div>
+              <div className="muted" style={{ fontSize: 11 }}>{t("60 Hz – 12 kHz")}</div>
+              <button className="btn" style={{ height: 24, fontSize: 11, marginTop: 8, padding: "0 8px" }} onClick={onToggleSpec}>{t("Hide")}</button>
+            </div>
+          )}
+          <div style={{ height: lay.loud.h, borderBottom: "1px solid var(--border)", padding: "8px 10px", fontSize: 12, display: "flex", flexDirection: "column", boxSizing: "border-box" }}>
+            <div style={{ color: "var(--bright)", fontWeight: 500 }}>{t("Loudness")}</div>
+            <div className="muted" style={{ fontSize: 11 }}>{t("ST 3 s · target {lufs}", { lufs: "−16" })}</div>
+            {!showSpec && <button className="btn" style={{ height: 20, fontSize: 10.5, padding: "0 6px", marginTop: 2, alignSelf: "flex-start" }} onClick={onToggleSpec}>{t("Show spectrum")}</button>}
+          </div>
         </div>
-      )}
-      <div style={{ height: 60, borderBottom: "1px solid var(--border)", padding: "8px 10px", fontSize: 12, display: "flex", flexDirection: "column" }}>
-        <div style={{ color: "var(--bright)", fontWeight: 500 }}>{t("Loudness")}</div>
-        <div className="muted" style={{ fontSize: 11 }}>{t("ST 3 s · target {lufs}", { lufs: "−16" })}</div>
-        {!showSpec && <button className="btn" style={{ height: 20, fontSize: 10.5, padding: "0 6px", marginTop: 2, alignSelf: "flex-start" }} onClick={onToggleSpec}>{t("Show spectrum")}</button>}
       </div>
     </div>
   );

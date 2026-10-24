@@ -97,6 +97,9 @@ export const editor: Record<string, string | string[]> = {
   "of {total}": "з {total}",
   "Horizontal zoom": "Горизонтальний масштаб",
   "Vertical zoom": "Вертикальний масштаб",
+  "Track height · double-click: fit the window": "Висота доріжки · подвійний клік: під вікно",
+  "Scroll tracks": "Прокрутка доріжок",
+  "Scroll tracks · Shift + wheel": "Прокрутка доріжок · Shift + коліщатко",
 
   // ---- editor page: automatic edits strip ----
   "Done automatically:": "Зроблено автоматично:",
